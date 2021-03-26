@@ -31,8 +31,8 @@ class Color:
     REVERSE = "\033[7m"
 
 
-def main():
-    local_modules = read_file(BRANCH_NAME)
+def push():
+    local_modules = read_file(os.path.join(SCRIPT_PATH, BRANCH_NAME))
     token = requests.post("http://{}:{}/api/auth/signin".format(SERVER_HOST, SERVER_PORT),
                           json={
                               "email": USERNAME,
@@ -46,6 +46,7 @@ def main():
     diff_module("modules", server_modules, local_modules)
     if server_modules == local_modules:
         print("Everything updated.")
+        return True
     else:
         if DAEMON_MODE:
             confirm = "yes"
@@ -61,12 +62,17 @@ def main():
                                     "branch": BRANCH_NAME,
                                     "modules": local_modules,
                                 }).json()
-            if res["ok"] == 1:
+            # res = {"ok": 1}
+            if res["ok"] and res["ok"] == 1:
                 print("Done.")
+                return True
             else:
+                print(res)
                 print("Failed.")
+                return False
         else:
             print("Aborted.")
+            return False
 
 
 def read_file(path):
@@ -154,20 +160,20 @@ if __name__ == "__main__":
             DAEMON_MODE = True
 
     now = datetime.datetime.now()
-    main()
-    if DAEMON_MODE:
+    push_res = push()
+    if push_res and DAEMON_MODE:
         print("Start watching \"{}\"...".format(BRANCH_NAME))
-    while DAEMON_MODE:
+    while push_res and DAEMON_MODE:
+        time.sleep(1)
         break_flag = False
-        for root, dirs, files in os.walk(BRANCH_NAME):
+        for root, dirs, files in os.walk(os.path.join(SCRIPT_PATH, BRANCH_NAME)):
             for f in files:
                 modify_time = datetime.datetime.fromtimestamp(os.stat(os.path.join(root, f)).st_mtime)
                 if modify_time > now:
                     now = datetime.datetime.now()
-                    # print(os.path.join(root, f), modify_time)
-                    main()
+                    print("Modify detected @ {}".format(modify_time.strftime("%Y-%m-%d %H:%M:%S")))
+                    push_res = push()
                     break_flag = True
                     break
             if break_flag:
                 break
-        time.sleep(1)

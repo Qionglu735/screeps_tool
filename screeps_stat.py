@@ -12,22 +12,20 @@ from config import *
 
 
 def main():
-    db = MySQLdb.connect(DB_HOST, DB_USERNAME, DB_PASSWORD, port=DB_PORT, charset="utf8")
+    db = MySQLdb.connect(DB_HOST, DB_USERNAME, DB_PASSWORD, port=DB_PORT, charset="utf-8")
     cursor = db.cursor()
-    # cursor.execute("create database if not exists screeps_stat")
-    # cursor.execute("create database screeps_stat")
     try:
         cursor.execute("USE screeps_stat")
     except MySQLdb.OperationalError:
         if "Unknown database" in traceback.format_exc():
-            print("database not exists")
+            print("database not exists: {}".format("screeps_stat"))
             cursor.execute("CREATE DATABASE screeps_stat")
             cursor.execute("USE screeps_stat")
 
     if cursor.execute("SELECT table_name "
                       "FROM information_schema.TABLES "
                       "WHERE table_name ='cpu'") == 0:
-        print("table not exist")
+        print("table not exist: {}".format("cpu"))
         cursor.execute("CREATE TABLE `cpu` ("
                        "time_stamp DATETIME, "
                        "used FLOAT, "
@@ -38,7 +36,7 @@ def main():
     if cursor.execute("SELECT table_name "
                       "FROM information_schema.TABLES "
                       "WHERE table_name ='energy'") == 0:
-        print("table not exist")
+        print("table not exist: {}".format("energy"))
         cursor.execute("CREATE TABLE `energy` ("
                        "time_stamp DATETIME, "
                        "room VARCHAR(8), "
@@ -50,7 +48,7 @@ def main():
     if cursor.execute("SELECT table_name "
                       "FROM information_schema.TABLES "
                       "WHERE table_name ='rcl'") == 0:
-        print("table not exist")
+        print("table not exist: {}".format("rcl"))
         cursor.execute("CREATE TABLE `rcl` ("
                        "time_stamp DATETIME, "
                        "room VARCHAR(8), "
@@ -86,6 +84,7 @@ def main():
                        "VALUES (NOW(), '{}', {}, {}, {});".format(
                             room, data["progress"], data["progress_total"], data["level"]))
     db.commit()
+    db.close()
 
 
 if __name__ == "__main__":
