@@ -3,7 +3,6 @@
 
 import datetime
 import difflib
-import json
 import os
 import requests
 import time
@@ -12,12 +11,13 @@ import sys
 from config import *
 
 
-
-
 DAEMON_MODE = False
 
 
 class Color:
+    def __init__(self):
+        pass
+
     RED = "\033[91m"
     GREEN = "\033[92m"
     YELLOW = "\033[93m"
