@@ -12,7 +12,7 @@ from config import *
 
 
 def main():
-    db = MySQLdb.connect(DB_HOST, DB_USERNAME, DB_PASSWORD, port=DB_PORT, charset="utf-8")
+    db = MySQLdb.connect(DB_HOST, DB_USERNAME, DB_PASSWORD, port=DB_PORT, charset="utf8")
     cursor = db.cursor()
     try:
         cursor.execute("USE screeps_stat")
@@ -57,6 +57,28 @@ def main():
                        "level INT"
                        ")")
 
+    if cursor.execute("SELECT table_name "
+                      "FROM information_schema.TABLES "
+                      "WHERE table_name ='room_info'") == 0:
+        print("table not exist: {}".format("room_info"))
+        cursor.execute("CREATE TABLE `room_info` ("
+                       "id INT, "
+                       "room VARCHAR(8), "
+                       "claim_status VARCHAR(32), "
+                       "hostile_status VARCHAR(32)"
+                       ")")
+
+    if cursor.execute("SELECT table_name "
+                      "FROM information_schema.TABLES "
+                      "WHERE table_name ='misc_info'") == 0:
+        print("table not exist: {}".format("misc_info"))
+        cursor.execute("CREATE TABLE `misc_info` ("
+                       "id INT, "
+                       "room VARCHAR(8), "
+                       "info_key VARCHAR(256), "
+                       "info_value VARCHAR(256)"
+                       ")")
+
     token = requests.post("http://{}:{}/api/auth/signin".format(SERVER_HOST, SERVER_PORT),
                           json={
                               "email": USERNAME,
@@ -83,6 +105,17 @@ def main():
         cursor.execute("INSERT INTO `rcl` "
                        "VALUES (NOW(), '{}', {}, {}, {});".format(
                             room, data["progress"], data["progress_total"], data["level"]))
+    cursor.execute("DELETE FROM `room_info`;")
+    for _i, data in enumerate(memory["stat"]["room_info"]):
+        cursor.execute("INSERT INTO `room_info` "
+                       "VALUES ({}, '{}', '{}', '{}');".format(
+                            _i, data["room_name"], data["claim_status"], data["hostile_status"]))
+    cursor.execute("DELETE FROM `misc_info`;")
+    _i = 0
+    for info_key in memory["stat"]["misc_info"]:
+        cursor.execute("INSERT INTO `misc_info` "
+                       "VALUES ({}, '{}', '{}', '{}');".format(
+                            _i, info_key.split("|")[0], info_key.split("|")[1], memory["stat"]["misc_info"][info_key]))
     db.commit()
     db.close()
 
