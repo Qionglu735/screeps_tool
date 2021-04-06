@@ -201,28 +201,28 @@ class RoomView(object):
         for i, item in self.__room_object.items():
             if item["x"] == x and item["y"] == y:
                 log(json.dumps(item))
-                # info = {
-                #     "_id": item["_id"],
-                #     "type": item["type"],
-                #     "x": item["x"],
-                #     "y": item["y"],
-                # }
-                # if "hits" in item:
-                #     info["hits"] = item["hits"]
-                #     info["hitsMax"] = item["hitsMax"]
-                # if "store" in item:
-                #     info["store"] = item["store"]
-                #     info["storeCapacityResource"] = item["storeCapacityResource"]
-                # if "safeModeAvailable" in item:  # controller
-                #     info["safeModeAvailable"] = item["safeModeAvailable"]
-                #     info["safeModeCooldown"] = item["safeModeCooldown"]
-                #     info["level"] = item["level"]
-                #     info["progress"] = item["progress"]
-                # if "mineralType" in item:  # mineral
-                #     info["mineralType"] = item["mineralType"]
                 info = copy.deepcopy(item)
-                for key in ["meta", "$loki"]:
-                    del info[key]
+                if "body" in info:
+                    log("HERE")
+                    body = list()
+                    type_dict = {
+                        "move": "M",
+                        "work": "W",
+                        "carry": "C",
+                        "attack": "A",
+                        "range_attack": "R",
+                        "heal": "H",
+                        "claim": "L",
+                        "tough": "T",
+                    }
+                    for part in info["body"]:
+                        log(part["type"])
+                        body.append(type_dict[part["type"]])
+                    info["body"] = "".join(body)
+                    log(info["body"])
+                for key in ["meta", "$loki", "actionLog"]:
+                    if key in info:
+                        del info[key]
                 info_list.append(info)
         return info_list
 
@@ -231,6 +231,7 @@ class Render(object):
 
     def __init__(self):
         self.__quit = False
+        self.__pause = False
 
         self.__screen_height = 0
         self.__screen_width = 0
@@ -238,13 +239,18 @@ class Render(object):
         self.__cursor_x = 0
         self.__cursor_y = 0
 
-        self.__room_display_left, self.__room_display_top = 3, 1
+        self.__panel = "room"
+
+        self.__room_display_left, self.__room_display_top = 2, 2
         self.__room_display_width, self.__room_display_height = 50, 30
         self.__room_max_width, self.__room_max_height = 50, 50
         self.__room_view = RoomView()
         self.__room_view_left, self.__room_view_right = 0, self.__room_display_width
         self.__room_view_top, self.__room_view_bottom = 0, self.__room_display_height
         self.__room_object_info = list()
+
+        self.__cursor_x = self.__room_display_left + self.__room_display_width // 2
+        self.__cursor_y = self.__room_display_top + self.__room_display_height // 2
 
         self.map_source = None
 
@@ -261,20 +267,43 @@ class Render(object):
 
         # Start colors in curses
         curses.start_color()
-        curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)
-        curses.init_pair(2, curses.COLOR_CYAN, curses.COLOR_BLACK)
+        curses.init_pair(1, curses.COLOR_CYAN, curses.COLOR_WHITE)
+        curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_WHITE)
         curses.init_pair(3, curses.COLOR_RED, curses.COLOR_BLACK)
 
         while not self.__quit:
+
+            if self.__pause:
+                screen.move(self.__cursor_y, self.__cursor_x)
+                screen.refresh()
+                continue
+
             # Initialization
             screen.clear()
             self.__screen_height, self.__screen_width = screen.getmaxyx()
 
-            # TODO: Menu: [1]room panel, [2]log panel, [3]memory panel, [esc]Exit
+            if self.__panel == "room":
+                screen.addstr(0, 0, "{: <16}".format("[1]Room"), curses.color_pair(1))
+            else:
+                screen.addstr(0, 0, "{: <16}".format("[1]Room"), curses.color_pair(2))
+
+            if self.__panel == "log":
+                screen.addstr(0, 16, "{: <16}".format("[2]Log"), curses.color_pair(1))
+            else:
+                screen.addstr(0, 16, "{: <16}".format("[2]Log"), curses.color_pair(2))
+
+            if self.__panel == "memory":
+                screen.addstr(0, 32, "{: <16}".format("[3]Memory"), curses.color_pair(1))
+            else:
+                screen.addstr(0, 32, "{: <16}".format("[3]Memory"), curses.color_pair(2))
+
+            screen.addstr(0, 16 * 3, " " * (self.__screen_width - 16 * 4), curses.color_pair(2))
+            screen.addstr(0, self.__screen_width - 16, "{: <16}".format("[ESC]Exit"), curses.color_pair(2))
+
             # TODO: room panel: room view, object view, info view
             # TODO: room panel: [h|j|k|l] to move in room view
-            # TODO: room panel: [up|down] to switch between object
-            # TODO: room panel: [page up|page down] to scroll info
+            # TODO: room panel: [TAB] to switch between object
+            # TODO: room panel: [up|down] to scroll info
             # TODO: log panel: log view with scrolling[page up|page down]
             # TODO: log panel: console command with history[up|down]
 
@@ -291,11 +320,11 @@ class Render(object):
             # TODO: render object list
             # TODO: render info
             if len(self.__room_object_info) > 0:
-                log(json.dumps(self.__room_object_info, indent=4, sort_keys=True))
+                # log(json.dumps(self.__room_object_info[0], indent=4, sort_keys=True))
                 info_list = json.dumps(self.__room_object_info, indent=4, sort_keys=True).splitlines()
                 for y, line in enumerate(info_list[: self.__screen_height - 5]):
-                    screen.addstr(1 + y, 60,
-                                  line[:self.__screen_width - 60], curses.color_pair(0))
+                    screen.addstr(2 + y, 55,
+                                  line[:self.__screen_width - 55], curses.color_pair(0))
 
             screen.move(self.__cursor_y, self.__cursor_x)
 
@@ -305,10 +334,12 @@ class Render(object):
         self.__room_view.stop()
 
     def keyboard_handler(self, event):
-        clear_output()
-        log(event.name)
+        # clear_output()
+        # log(event.name)
         if event.name == "esc":
             self.__quit = True
+        if event.name == "p":
+            self.__pause = not self.__pause
         if self.__cursor_x in range(self.__room_display_left,
                                     self.__room_display_left + self.__room_display_width) \
                 and self.__cursor_y in range(self.__room_display_top,
