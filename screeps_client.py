@@ -3,16 +3,17 @@
 
 import copy
 import curses
+import datetime
 import json
 import keyboard
-import time
+import os
+import sys
 
 import screeps_api
 
 
 def clear_output():
-    import os
-    os.system('cls' if os.name == 'nt' else 'clear')
+    os.system("cls" if os.name == "nt" else "clear")
 
 
 def flush_input():
@@ -21,116 +22,8 @@ def flush_input():
         while msvcrt.kbhit():
             msvcrt.getch()
     except ImportError:
-        import sys
         import termios
         termios.tcflush(sys.stdin, termios.TCIOFLUSH)
-
-
-def keyboard_event(x, sc):
-    clear_output()
-    print(x.to_json())
-    if x.name == "c" and keyboard.is_pressed("ctrl"):
-        sc.stop()
-
-
-def room_callback(message):
-    data = json.loads(message)[1]["objects"]
-    for i in data:
-        print i, data[i]
-
-
-def main():
-    socket = screeps_api.Socket()
-    keyboard.on_press(lambda x: keyboard_event(x, socket))
-    socket.subscribe("room", "W8N3")
-    socket.callback = room_callback
-    socket.start()
-    socket.join()
-
-
-def draw_menu(stdscr):
-    k = 0
-    cursor_x = 0
-    cursor_y = 0
-
-    # Clear and refresh the screen for a blank canvas
-    stdscr.clear()
-    stdscr.refresh()
-
-    # Start colors in curses
-    curses.start_color()
-    curses.init_pair(1, curses.COLOR_CYAN, curses.COLOR_BLACK)
-    curses.init_pair(2, curses.COLOR_RED, curses.COLOR_BLACK)
-    curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_WHITE)
-
-    # Loop where k is the last character pressed
-    while k != ord('q'):
-
-        # Initialization
-        stdscr.clear()
-        height, width = stdscr.getmaxyx()
-
-        if k == curses.KEY_DOWN:
-            cursor_y = cursor_y + 1
-        elif k == curses.KEY_UP:
-            cursor_y = cursor_y - 1
-        elif k == curses.KEY_RIGHT:
-            cursor_x = cursor_x + 1
-        elif k == curses.KEY_LEFT:
-            cursor_x = cursor_x - 1
-
-        cursor_x = max(0, cursor_x)
-        cursor_x = min(width-1, cursor_x)
-
-        cursor_y = max(0, cursor_y)
-        cursor_y = min(height-1, cursor_y)
-
-        # Declaration of strings
-        title = "Curses example"[:width-1]
-        subtitle = "Written by Clay McLeod"[:width-1]
-        keystr = "Last key pressed: {}".format(k)[:width-1]
-        statusbarstr = "Press 'q' to exit | STATUS BAR | Pos: {}, {}".format(cursor_x, cursor_y)
-        if k == 0:
-            keystr = "No key press detected..."[:width-1]
-
-        # Centering calculations
-        start_x_title = int((width // 2) - (len(title) // 2) - len(title) % 2)
-        start_x_subtitle = int((width // 2) - (len(subtitle) // 2) - len(subtitle) % 2)
-        start_x_keystr = int((width // 2) - (len(keystr) // 2) - len(keystr) % 2)
-        start_y = int((height // 2) - 2)
-
-        # Rendering some text
-        whstr = "Width: {}, Height: {}".format(width, height)
-        stdscr.addstr(0, 0, whstr, curses.color_pair(1))
-
-        # Render status bar
-        stdscr.attron(curses.color_pair(3))
-        stdscr.addstr(height-1, 0, statusbarstr)
-        stdscr.addstr(height-1, len(statusbarstr), " " * (width - len(statusbarstr) - 1))
-        stdscr.attroff(curses.color_pair(3))
-
-        # Turning on attributes for title
-        stdscr.attron(curses.color_pair(2))
-        stdscr.attron(curses.A_BOLD)
-
-        # Rendering title
-        stdscr.addstr(start_y, start_x_title, title)
-
-        # Turning off attributes for title
-        stdscr.attroff(curses.color_pair(2))
-        stdscr.attroff(curses.A_BOLD)
-
-        # Print rest of text
-        stdscr.addstr(start_y + 1, start_x_subtitle, subtitle)
-        stdscr.addstr(start_y + 3, (width // 2) - 2, '-' * 4)
-        stdscr.addstr(start_y + 5, start_x_keystr, keystr)
-        stdscr.move(cursor_y, cursor_x)
-
-        # Refresh the screen
-        stdscr.refresh()
-
-        # Wait for next input
-        k = stdscr.getch()
 
 
 class RoomView(object):
@@ -149,7 +42,9 @@ class RoomView(object):
 
     def stop(self):
         self.__socket.stop()
+        log("socket stopped")
         self.__socket.join()
+        log("socket joined")
 
     def __room_callback(self, message):
         data = json.loads(message)[1]["objects"]
@@ -163,9 +58,9 @@ class RoomView(object):
         # for i in self.__room_object:
         #     if self.__room_object[i]["room"] == self.__room_name and i not in data:
         #         del self.__room_object[i]
-        self.refresh()
+        self.__refresh_data()
 
-    def refresh(self):
+    def __refresh_data(self):
         self.__room_matrix = [["." for _ in range(50)] for _ in range(50)]
         api = screeps_api.Api()
         terrain_data = api.get_room_terrain(self.__room_name)["terrain"]
@@ -179,13 +74,17 @@ class RoomView(object):
                 "source": "$",
                 "mineral": "&",
                 "creep": "@",
+                "tombstone": "M",
                 "controller": "C",
                 "spawn": "W",
                 "tower": "T",
                 "container": "N",
                 "extension": "X",
                 "storage": "R",
+                "constructionSite": "S",
+                "ruin": "U",
                 "road": "o",
+                "energy": "e",
             }
             if item["room"] == self.__room_name:
                 self.__room_matrix[int(item["y"])][int(item["x"])] = char_map[item["type"]] \
@@ -202,29 +101,126 @@ class RoomView(object):
             if item["x"] == x and item["y"] == y:
                 log(json.dumps(item))
                 info = copy.deepcopy(item)
+                body_part_dict = {
+                    "move": "M",
+                    "work": "W",
+                    "carry": "C",
+                    "attack": "A",
+                    "range_attack": "R",
+                    "heal": "H",
+                    "claim": "L",
+                    "tough": "T",
+                }
                 if "body" in info:
-                    log("HERE")
                     body = list()
-                    type_dict = {
-                        "move": "M",
-                        "work": "W",
-                        "carry": "C",
-                        "attack": "A",
-                        "range_attack": "R",
-                        "heal": "H",
-                        "claim": "L",
-                        "tough": "T",
-                    }
                     for part in info["body"]:
                         log(part["type"])
-                        body.append(type_dict[part["type"]])
+                        body.append(body_part_dict[part["type"]])
                     info["body"] = "".join(body)
-                    log(info["body"])
+                if "creepBody" in info:
+                    body = list()
+                    for part in info["creepBody"]:
+                        body.append(body_part_dict[part])
+                    info["creepBody"] = "".join(body)
                 for key in ["meta", "$loki", "actionLog"]:
                     if key in info:
                         del info[key]
                 info_list.append(info)
         return info_list
+
+
+class LogView(object):
+
+    def __init__(self):
+        self.line_length = 80
+
+        self.__socket = screeps_api.Socket()
+        self.__api = screeps_api.Api()
+
+        self.__log_list = list()
+        self.__log_max_length = 2000
+        self.__cmd = None
+
+    def watch(self):
+        self.__socket.subscribe("user", "console")
+        self.__socket.callback = self.__console_callback
+        self.__socket.start()
+
+    def stop(self):
+        self.__socket.stop()
+        self.__socket.join()
+
+    def get_log(self):
+        return copy.deepcopy(self.__log_list)
+
+    def send_cmd(self, cmd):
+        self.__cmd = cmd
+
+    def __console_callback(self, message):
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        data = json.loads(message)[1]
+        if "messages" in data:
+            for line in data["messages"]["log"]:
+                for _l in self.__parse_line(line):
+                    self.__log_list.append({
+                        "type": "normal",
+                        "log": _l,
+                        "time": now,
+                    })
+            del data["messages"]["log"]
+        if "error" in data:
+            for line in data["error"].split("\n"):
+                for _l in self.__parse_line(line):
+                    self.__log_list.append({
+                        "type": "error",
+                        "log": _l,
+                        "time": now,
+                    })
+            del data["error"]
+        if "messages" in data:
+            for line in data["messages"]["results"]:
+                for _l in self.__parse_line(line):
+                    self.__log_list.append({
+                        "type": "output",
+                        "log": _l,
+                        "time": now,
+                    })
+            del data["messages"]["results"]
+        if self.__cmd is not None:
+            for _l in self.__parse_line(self.__cmd):
+                self.__log_list.append({
+                    "type": "command",
+                    "log": _l
+                })
+            self.__api.post_user_console(self.__cmd)
+            self.__cmd = None
+
+        if len(data["messages"].keys()) == 0:
+            del data["messages"]
+        if len(data.keys()) > 0:
+            for _l in self.__parse_line(json.dumps(data)):
+                self.__log_list.append({
+                    "type": "debug",
+                    "log": _l
+                })
+
+        self.__refresh_data()
+
+    def __parse_line(self, line):
+        line_list = list()
+        _l = copy.deepcopy(line)
+        # line_list.append(_l[:self.line_length - 19])  # len("YYYY-MM-DD HH:MM:SS") = 19
+        # _l = _l[self.line_length - 19:]
+        while len(_l) > self.line_length:
+            line_list.append(_l[:self.line_length])
+            _l = _l[self.line_length:]
+        if len(_l) > 0:
+            line_list.append(_l)
+        return line_list
+
+    def __refresh_data(self):
+        if len(self.__log_list) > self.__log_max_length:
+            self.__log_list = self.__log_list[len(self.__log_list) - 2000:]
 
 
 class Render(object):
@@ -239,8 +235,9 @@ class Render(object):
         self.__cursor_x = 0
         self.__cursor_y = 0
 
-        self.__panel = "room"
+        self.__panel = "console"
 
+        # Map Panel
         self.__room_display_left, self.__room_display_top = 2, 2
         self.__room_display_width, self.__room_display_height = 50, 30
         self.__room_max_width, self.__room_max_height = 50, 50
@@ -248,28 +245,43 @@ class Render(object):
         self.__room_view_left, self.__room_view_right = 0, self.__room_display_width
         self.__room_view_top, self.__room_view_bottom = 0, self.__room_display_height
         self.__room_object_info = list()
-
         self.__cursor_x = self.__room_display_left + self.__room_display_width // 2
         self.__cursor_y = self.__room_display_top + self.__room_display_height // 2
+
+        # Console Panel
+        self.__log_view = LogView()
+        self.__log_index = -1
+        self.__cmd = ""
+        self.__cursor_pos = 0
+        self.__cmd_left = 0
+        self.__cmd_history = list()
+        self.__cmd_history_max = 20
+        self.__cmd_index = 0
 
         self.map_source = None
 
     def start(self):
         self.__room_view.watch()
+        self.__log_view.watch()
         curses.wrapper(self.display)
 
     def display(self, screen):
         keyboard.on_press(lambda event: self.keyboard_handler(event))
 
         # Clear and refresh the screen for a blank canvas
-        screen.clear()
+        # screen.clear()
+        self.__screen_height, self.__screen_width = screen.getmaxyx()
         # screen.refresh()
+
+        self.__log_view.line_length = self.__screen_width
 
         # Start colors in curses
         curses.start_color()
         curses.init_pair(1, curses.COLOR_CYAN, curses.COLOR_WHITE)
         curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_WHITE)
         curses.init_pair(3, curses.COLOR_RED, curses.COLOR_BLACK)
+        curses.init_pair(4, curses.COLOR_CYAN, curses.COLOR_BLACK)
+        curses.init_pair(5, curses.COLOR_YELLOW, curses.COLOR_BLACK)
 
         while not self.__quit:
 
@@ -282,15 +294,15 @@ class Render(object):
             screen.clear()
             self.__screen_height, self.__screen_width = screen.getmaxyx()
 
-            if self.__panel == "room":
-                screen.addstr(0, 0, "{: <16}".format("[1]Room"), curses.color_pair(1))
+            if self.__panel == "map":
+                screen.addstr(0, 0, "{: <16}".format("[1]Map"), curses.color_pair(1))
             else:
-                screen.addstr(0, 0, "{: <16}".format("[1]Room"), curses.color_pair(2))
+                screen.addstr(0, 0, "{: <16}".format("[1]Map"), curses.color_pair(2))
 
-            if self.__panel == "log":
-                screen.addstr(0, 16, "{: <16}".format("[2]Log"), curses.color_pair(1))
+            if self.__panel == "console":
+                screen.addstr(0, 16, "{: <16}".format("[2]Console"), curses.color_pair(1))
             else:
-                screen.addstr(0, 16, "{: <16}".format("[2]Log"), curses.color_pair(2))
+                screen.addstr(0, 16, "{: <16}".format("[2]Console"), curses.color_pair(2))
 
             if self.__panel == "memory":
                 screen.addstr(0, 32, "{: <16}".format("[3]Memory"), curses.color_pair(1))
@@ -305,83 +317,204 @@ class Render(object):
             # TODO: room panel: [TAB] to switch between object
             # TODO: room panel: [up|down] to scroll info
             # TODO: log panel: log view with scrolling[page up|page down]
-            # TODO: log panel: console command with history[up|down]
 
-            # # Rendering some text
-            # test = "Width: {}, Height: {}".format(self.__screen_width, self.__screen_height)
-            # screen.addstr(5, 2, test, curses.color_pair(1))
-            # test = "x: {}, y: {}".format(self.__cursor_x, self.__cursor_y)
-            # screen.addstr(6, 2, test, curses.color_pair(1))
+            if self.__panel == "map":
+                # render room
+                for y, line in enumerate(self.__room_view.get_matrix()[self.__room_view_top: self.__room_view_bottom]):
+                    screen.addstr(self.__room_display_top + y, self.__room_display_left,
+                                  "".join(line[self.__room_view_left: self.__room_view_right]), curses.color_pair(0))
+                # TODO: render object list
+                # TODO: render info
+                if len(self.__room_object_info) > 0:
+                    # log(json.dumps(self.__room_object_info[0], indent=4, sort_keys=True))
+                    info_list = json.dumps(self.__room_object_info, indent=4, sort_keys=True).splitlines()
+                    for y, line in enumerate(info_list[: self.__screen_height - 5]):
+                        screen.addstr(2 + y, 55,
+                                      line[:self.__screen_width - 55], curses.color_pair(0))
 
-            # render room
-            for y, line in enumerate(self.__room_view.get_matrix()[self.__room_view_top: self.__room_view_bottom]):
-                screen.addstr(self.__room_display_top + y, self.__room_display_left,
-                              "".join(line[self.__room_view_left: self.__room_view_right]), curses.color_pair(0))
-            # TODO: render object list
-            # TODO: render info
-            if len(self.__room_object_info) > 0:
-                # log(json.dumps(self.__room_object_info[0], indent=4, sort_keys=True))
-                info_list = json.dumps(self.__room_object_info, indent=4, sort_keys=True).splitlines()
-                for y, line in enumerate(info_list[: self.__screen_height - 5]):
-                    screen.addstr(2 + y, 55,
-                                  line[:self.__screen_width - 55], curses.color_pair(0))
+                screen.move(self.__cursor_y, self.__cursor_x)
 
-            screen.move(self.__cursor_y, self.__cursor_x)
+            elif self.__panel == "console":
+                log_list = self.__log_view.get_log()
+                index_range = self.__screen_height - 2 if len(log_list) > self.__screen_height else len(log_list)
+                if len(log_list) <= self.__screen_height - 2:
+                    index_start = 0
+                elif self.__log_index == -1:
+                    index_start = len(log_list) - index_range
+                else:
+                    index_start = self.__log_index
+                for i in range(index_start, index_start + index_range):
+                    # log("{} {} {}".format(i, log_list[i]["type"], log_list[i]["log"]))
+                    if log_list[i]["type"] == "error":
+                        screen.addstr(1 + i - index_start, 0, log_list[i]["log"], curses.color_pair(3))
+                    elif log_list[i]["type"] == "command":
+                        screen.addstr(1 + i - index_start, 0, "> {}".format(log_list[i]["log"]), curses.color_pair(4))
+                    elif log_list[i]["type"] == "output":
+                        screen.addstr(1 + i - index_start, 0, log_list[i]["log"], curses.color_pair(5))
+                    else:
+                        screen.addstr(1 + i - index_start, 0, log_list[i]["log"], curses.color_pair(0))
+                cmd = copy.deepcopy(self.__cmd)[self.__cmd_left:][:self.__screen_width - 2 - 1]
+                screen.addstr(self.__screen_height - 1, 0, "> ", curses.color_pair(2))
+                for i, ch in enumerate(cmd):
+                    screen.insch(self.__screen_height - 1, 2 + i, str(ch), curses.color_pair(2))
+                for i in range(2 + len(cmd), self.__screen_width):
+                    screen.insch(self.__screen_height - 1, i, " ", curses.color_pair(2))
+
+                screen.move(self.__screen_height - 1, 2 + self.__cursor_pos)
 
             # Refresh the screen
             screen.refresh()
 
         self.__room_view.stop()
+        self.__log_view.stop()
 
     def keyboard_handler(self, event):
+        # https://stackoverflow.com/questions/10266281/obtain-active-window-using-python
+        if sys.platform == "win32":
+            from win32gui import GetWindowText, GetForegroundWindow
+            if "screeps-client" not in GetWindowText(GetForegroundWindow()):
+                return
+
         # clear_output()
         # log(event.name)
+
+        if event.name == "1" and keyboard.is_pressed("ctrl"):
+            self.__panel = "map"
+            return
+        if event.name == "2" and keyboard.is_pressed("ctrl"):
+            self.__panel = "console"
+            return
+        if event.name == "3" and keyboard.is_pressed("ctrl"):
+            self.__panel = "memory"
+            return
         if event.name == "esc":
             self.__quit = True
-        if event.name == "p":
-            self.__pause = not self.__pause
-        if self.__cursor_x in range(self.__room_display_left,
-                                    self.__room_display_left + self.__room_display_width) \
-                and self.__cursor_y in range(self.__room_display_top,
-                                             self.__room_display_top + self.__room_display_height):
-            if event.name == "left":
-                self.__cursor_x = max(0, self.__cursor_x - 1)
-                # if self.__cursor_x - 3 < 5:
-                #     self.__room_view_left = max(0, self.__room_view_left - 1)
-                #     self.__room_view_right = max(30, self.__room_view_right - 1)
-            if event.name == "right":
-                self.__cursor_x = min(self.__screen_width - 1, self.__cursor_x + 1)
-                # if 33 - self.__cursor_x < 5:
-                #     self.__room_view_left = min(20, self.__room_view_left + 1)
-                #     self.__room_view_right = min(50, self.__room_view_right + 1)
-            if event.name == "up":
-                if self.__room_display_top == self.__cursor_y \
-                        and self.__room_view_top > 0:
-                    self.__room_view_top = max(0, self.__room_view_top - 1)
-                    self.__room_view_bottom = max(self.__room_display_height, self.__room_view_bottom - 1)
-                else:
-                    self.__cursor_y = max(0, self.__cursor_y - 1)
-            if event.name == "down":
-                if self.__room_display_top + self.__room_display_height - 1 == self.__cursor_y \
-                        and self.__room_view_bottom < self.__room_max_height:
-                    self.__room_view_top = min(self.__room_max_height - self.__room_display_height,
-                                               self.__room_view_top + 1)
-                    self.__room_view_bottom = min(self.__room_max_height, self.__room_view_bottom + 1)
-                else:
-                    self.__cursor_y = min(self.__screen_height - 1, self.__cursor_y + 1)
+            return
 
-            self.__room_object_info = self.__room_view.get_info(
-                    self.__cursor_x - self.__room_display_left + self.__room_view_left,
-                    self.__cursor_y - self.__room_display_top + self.__room_view_top)
-        else:
+        if self.__panel == "map":
+            if event.name == "p":
+                self.__pause = not self.__pause
+
+            if event.name == "r":
+                self.__room_view.stop()
+                self.__room_view = RoomView()
+                self.__room_view.watch()
+
+            if self.__cursor_x in range(self.__room_display_left,
+                                        self.__room_display_left + self.__room_display_width) \
+                    and self.__cursor_y in range(self.__room_display_top,
+                                                 self.__room_display_top + self.__room_display_height):
+                if event.name == "left":
+                    self.__cursor_x = max(0, self.__cursor_x - 1)
+                    # if self.__cursor_x - 3 < 5:
+                    #     self.__room_view_left = max(0, self.__room_view_left - 1)
+                    #     self.__room_view_right = max(30, self.__room_view_right - 1)
+                if event.name == "right":
+                    self.__cursor_x = min(self.__screen_width - 1, self.__cursor_x + 1)
+                    # if 33 - self.__cursor_x < 5:
+                    #     self.__room_view_left = min(20, self.__room_view_left + 1)
+                    #     self.__room_view_right = min(50, self.__room_view_right + 1)
+                if event.name == "up":
+                    if self.__room_display_top == self.__cursor_y \
+                            and self.__room_view_top > 0:
+                        self.__room_view_top = max(0, self.__room_view_top - 1)
+                        self.__room_view_bottom = max(self.__room_display_height, self.__room_view_bottom - 1)
+                    else:
+                        self.__cursor_y = max(0, self.__cursor_y - 1)
+                if event.name == "down":
+                    if self.__room_display_top + self.__room_display_height - 1 == self.__cursor_y \
+                            and self.__room_view_bottom < self.__room_max_height:
+                        self.__room_view_top = min(self.__room_max_height - self.__room_display_height,
+                                                   self.__room_view_top + 1)
+                        self.__room_view_bottom = min(self.__room_max_height, self.__room_view_bottom + 1)
+                    else:
+                        self.__cursor_y = min(self.__screen_height - 1, self.__cursor_y + 1)
+
+                self.__room_object_info = self.__room_view.get_info(
+                        self.__cursor_x - self.__room_display_left + self.__room_view_left,
+                        self.__cursor_y - self.__room_display_top + self.__room_view_top)
+            else:
+                if event.name == "left":
+                    self.__cursor_x = max(0, self.__cursor_x - 1)
+                if event.name == "right":
+                    self.__cursor_x = min(self.__screen_width - 1, self.__cursor_x + 1)
+                if event.name == "up":
+                    self.__cursor_y = max(0, self.__cursor_y - 1)
+                if event.name == "down":
+                    self.__cursor_y = min(self.__screen_height - 1, self.__cursor_y + 1)
+        elif self.__panel == "console":
+            log_max_display_height = (self.__screen_height - 2) // 2
+            log_len = len(self.__log_view.get_log())
+            if event.name == "page up":
+                if self.__log_index == -1:
+                    self.__log_index = log_len - log_max_display_height if log_len > log_max_display_height else 0
+                self.__log_index = max(0, self.__log_index - log_max_display_height)
+            if event.name == "page down":
+                if self.__log_index != -1:
+                    self.__log_index = min(log_len - log_max_display_height, self.__log_index + log_max_display_height)
+                    if self.__log_index >= log_len - log_max_display_height:
+                        self.__log_index = -1
+            cmd_max_display_length = self.__screen_width - 2 - 1
+            if event.name.lower() in "abcdefghijklmnopqrstuvwxyz0123456789-_=+!@#$%^&*()[]{}<>,.;:'\"\\/|?":
+                self.__cmd = self.__cmd[0: self.__cmd_left + self.__cursor_pos] + event.name \
+                             + self.__cmd[self.__cmd_left + self.__cursor_pos:]
+                if len(self.__cmd) - self.__cmd_left > cmd_max_display_length:
+                    self.__cmd_left += 1
+                else:
+                    self.__cursor_pos += 1
+            if event.name == "space":
+                self.__cmd = self.__cmd[0: self.__cmd_left + self.__cursor_pos] + " " \
+                             + self.__cmd[self.__cmd_left + self.__cursor_pos:]
+                self.__cursor_pos += 1
+            if event.name == "backspace":
+                if self.__cursor_pos > 0:
+                    self.__cmd = self.__cmd[0: self.__cmd_left + self.__cursor_pos - 1] + \
+                                 self.__cmd[self.__cmd_left + self.__cursor_pos:]
+                    self.__cursor_pos -= 1
+            if event.name == "delete":
+                if  self.__cmd_left + self.__cursor_pos < len(self.__cmd):
+                    self.__cmd = self.__cmd[0: self.__cmd_left + self.__cursor_pos] + \
+                                 self.__cmd[self.__cmd_left + self.__cursor_pos + 1:]
             if event.name == "left":
-                self.__cursor_x = max(0, self.__cursor_x - 1)
+                if self.__cursor_pos > 0:
+                    self.__cursor_pos -= 1
+                else:
+                    self.__cmd_left = max(0, self.__cmd_left - 1)
             if event.name == "right":
-                self.__cursor_x = min(self.__screen_width - 1, self.__cursor_x + 1)
+                if self.__cursor_pos < cmd_max_display_length:
+                    self.__cursor_pos = min(self.__cursor_pos + 1, len(self.__cmd) - self.__cmd_left)
+                else:
+                    self.__cmd_left = min(self.__cmd_left + 1, len(self.__cmd) - cmd_max_display_length)
+            if event.name == "home":
+                self.__cursor_pos = 0
+                self.__cmd_left = 0
+            if event.name == "end":
+                if len(self.__cmd) - self.__cmd_left > cmd_max_display_length:
+                    self.__cmd_left = len(self.__cmd) - cmd_max_display_length
+                self.__cursor_pos = len(self.__cmd) - self.__cmd_left
+            if event.name == "enter":
+                if self.__cmd != "":
+                    self.__log_view.send_cmd(self.__cmd)
+                    self.__cmd_history.append(self.__cmd)
+                    if len(self.__cmd_history) > self.__cmd_history_max:
+                        self.__cmd_history = self.__cmd_history[len(self.__cmd_history) - self.__cmd_history_max:]
+                    self.__cmd_index = len(self.__cmd_history)
+                    self.__cmd = ""
+                    self.__cursor_pos = 0
             if event.name == "up":
-                self.__cursor_y = max(0, self.__cursor_y - 1)
+                self.__cmd_index = max(-1, self.__cmd_index - 1)
+                if -1 < self.__cmd_index < len(self.__cmd_history):
+                    self.__cmd = self.__cmd_history[self.__cmd_index]
+                else:
+                    self.__cmd = ""
+                self.__cursor_pos = len(self.__cmd)
             if event.name == "down":
-                self.__cursor_y = min(self.__screen_height - 1, self.__cursor_y + 1)
+                self.__cmd_index = min(len(self.__cmd_history), self.__cmd_index + 1)
+                if -1 < self.__cmd_index < len(self.__cmd_history):
+                    self.__cmd = self.__cmd_history[self.__cmd_index]
+                else:
+                    self.__cmd = ""
+                self.__cursor_pos = len(self.__cmd)
 
 
 def log(line, filename="log"):
@@ -391,17 +524,18 @@ def log(line, filename="log"):
 
 def keyboard_event_test(x):
     clear_output()
-    print(x.to_json())
+    print(x.to_json(), keyboard.is_pressed("ctrl"))
 
 
 if __name__ == "__main__":
     # main()
 
-    # curses.wrapper(draw_menu)
-
     # keyboard.on_press(lambda event: keyboard_event_test(event))
     # while True:
     #     pass
+
+    if sys.platform == "win32":
+        os.system("title screeps-client")
 
     render = Render()
     render.start()

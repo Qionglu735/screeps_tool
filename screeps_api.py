@@ -170,8 +170,17 @@ class Api(object):
         return self.post("/api/user/code",
                          json=dict_data).json()
 
+    def post_user_console(self, expression):
+        return self.post("/api/user/console",
+                         json={
+                             "expression": expression
+                         }).json()
+
     def get_user_memory(self):
         return self.get("/api/user/memory").json()
+
+    def get_time(self):
+        return self.get("/api/game/time").json()
 
     def get_room_terrain(self, room):
         return self.get("/api/game/room-terrain",
@@ -180,8 +189,6 @@ class Api(object):
                         }).json()
 
 
-
-
-
-
-
+if __name__ == "__main__":
+    api = Api()
+    print api.get_time()
