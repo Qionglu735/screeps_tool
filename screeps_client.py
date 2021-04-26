@@ -5,7 +5,9 @@ import copy
 import curses
 import datetime
 import json
+import linecache
 import keyboard
+import re
 import os
 import sys
 
@@ -30,13 +32,17 @@ class RoomView(object):
 
     def __init__(self):
         self.__room_matrix = [["." for _ in range(50)] for _ in range(50)]
-        self.__room_name = "W8N3"
+        self.room_name = None
+        api = screeps_api.Api()
+        user_room_list = api.get_user_overview()["rooms"]
+        if len(user_room_list) > 0:
+            self.room_name = user_room_list[0]
         self.__room_object = dict()
-
-        self.__socket = screeps_api.Socket()
+        self.__socket = None
 
     def watch(self):
-        self.__socket.subscribe("room", self.__room_name)
+        self.__socket = screeps_api.Socket()
+        self.__socket.subscribe("room", self.room_name)
         self.__socket.callback = self.__room_callback
         self.__socket.start()
 
@@ -45,6 +51,7 @@ class RoomView(object):
         log("socket stopped")
         self.__socket.join()
         log("socket joined")
+        self.__room_matrix = [["." for _ in range(50)] for _ in range(50)]
 
     def __room_callback(self, message):
         data = json.loads(message)[1]["objects"]
@@ -63,10 +70,12 @@ class RoomView(object):
     def __refresh_data(self):
         self.__room_matrix = [["." for _ in range(50)] for _ in range(50)]
         api = screeps_api.Api()
-        terrain_data = api.get_room_terrain(self.__room_name)["terrain"]
+        terrain_data = api.get_room_terrain(self.room_name)["terrain"]
         for i in terrain_data:
             if i["type"] == "wall":
                 self.__room_matrix[int(i["y"])][int(i["x"])] = "#"
+            elif i["type"] == "swamp":
+                self.__room_matrix[int(i["y"])][int(i["x"])] = ":"
             else:
                 self.__room_matrix[int(i["y"])][int(i["x"])] = "?"
         for i, item in self.__room_object.items():
@@ -86,7 +95,7 @@ class RoomView(object):
                 "road": "o",
                 "energy": "e",
             }
-            if item["room"] == self.__room_name:
+            if item["room"] == self.room_name:
                 self.__room_matrix[int(item["y"])][int(item["x"])] = char_map[item["type"]] \
                     if item["type"] in char_map else "?"
         # for i in self.__room_matrix:
@@ -127,6 +136,75 @@ class RoomView(object):
                         del info[key]
                 info_list.append(info)
         return info_list
+
+    def change_room(self, direction_1, direction_2=""):
+        self.stop()
+        self.room_name = self.__convert_room_name(direction_1, direction_2)
+        self.watch()
+
+    def get_mini_map(self):
+        name_list = [
+            self.__convert_room_name("north", "west"),
+            self.__convert_room_name("north"),
+            self.__convert_room_name("north", "east"),
+            self.__convert_room_name("west"),
+            self.room_name,
+            self.__convert_room_name("east"),
+            self.__convert_room_name("south", "west"),
+            self.__convert_room_name("south"),
+            self.__convert_room_name("south", "east"),
+        ]
+        minimap = [
+            " {: >6} | {: ^6} | {: <6} ".format(name_list[0], name_list[1], name_list[2]),
+            "--------+--------+--------",
+            " {: >6} |[{: ^6}]| {: <6} ".format(name_list[3], name_list[4], name_list[5]),
+            "--------+--------+--------",
+            " {: >6} | {: ^6} | {: <6} ".format(name_list[6], name_list[7], name_list[8])
+        ]
+        return minimap
+
+    def __convert_room_name(self, direction_1, direction_2=""):
+        room_name_list = list(re.match(r"(\w)(\d+)(\w)(\d+)", self.room_name).groups())
+        room_name_list[1] = int(room_name_list[1])
+        room_name_list[3] = int(room_name_list[3])
+        for direction in [direction_1, direction_2]:
+            if direction.lower() not in ["west", "south", "north", "east"]:
+                continue
+            if direction.lower() == "west":
+                if room_name_list[0] == "E":
+                    if room_name_list[1] == 0:
+                        room_name_list[0] = "W"
+                    else:
+                        room_name_list[1] -= 1
+                else:
+                    room_name_list[1] += 1
+            elif direction.lower() == "south":
+                if room_name_list[2] == "N":
+                    if room_name_list[3] == 0:
+                        room_name_list[2] = "S"
+                    else:
+                        room_name_list[3] -= 1
+                else:
+                    room_name_list[3] += 1
+            elif direction.lower() == "north":
+                if room_name_list[2] == "S":
+                    if room_name_list[3] == 0:
+                        room_name_list[2] = "N"
+                    else:
+                        room_name_list[3] -= 1
+                else:
+                    room_name_list[3] += 1
+            elif direction.lower() == "east":
+                if room_name_list[0] == "W":
+                    if room_name_list[1] == 0:
+                        room_name_list[0] = "E"
+                    else:
+                        room_name_list[1] -= 1
+                else:
+                    room_name_list[1] += 1
+        room_name_list[1] = str(room_name_list[1])
+        room_name_list[3] = str(room_name_list[3])
+        return "".join(room_name_list)
 
 
 class LogView(object):
@@ -238,15 +316,17 @@ class Render(object):
         self.__panel = "console"
 
         # Map Panel
-        self.__room_display_left, self.__room_display_top = 2, 2
+        self.__room_display_left, self.__room_display_top = 2, 4
         self.__room_display_width, self.__room_display_height = 50, 30
         self.__room_max_width, self.__room_max_height = 50, 50
         self.__room_view = RoomView()
         self.__room_view_left, self.__room_view_right = 0, self.__room_display_width
         self.__room_view_top, self.__room_view_bottom = 0, self.__room_display_height
         self.__room_object_info = list()
+        self.__room_object_selected = 0
         self.__cursor_x = self.__room_display_left + self.__room_display_width // 2
         self.__cursor_y = self.__room_display_top + self.__room_display_height // 2
+        self.__shift_step = 5
 
         # Console Panel
         self.__log_view = LogView()
@@ -264,6 +344,9 @@ class Render(object):
         self.__room_view.watch()
         self.__log_view.watch()
         curses.wrapper(self.display)
+
+    def stop(self):
+        self.__quit = True
 
     def display(self, screen):
         keyboard.on_press(lambda event: self.keyboard_handler(event))
@@ -312,24 +395,35 @@ class Render(object):
             screen.addstr(0, 16 * 3, " " * (self.__screen_width - 16 * 4), curses.color_pair(2))
             screen.addstr(0, self.__screen_width - 16, "{: <16}".format("[ESC]Exit"), curses.color_pair(2))
 
-            # TODO: room panel: room view, object view, info view
-            # TODO: room panel: [h|j|k|l] to move in room view
-            # TODO: room panel: [TAB] to switch between object
-            # TODO: room panel: [up|down] to scroll info
-            # TODO: log panel: log view with scrolling[page up|page down]
-
             if self.__panel == "map":
-                # render room
+                # render room info
+                screen.addstr(2, 2, self.__room_view.room_name, curses.color_pair(0))
+
+                # render room detail
                 for y, line in enumerate(self.__room_view.get_matrix()[self.__room_view_top: self.__room_view_bottom]):
                     screen.addstr(self.__room_display_top + y, self.__room_display_left,
                                   "".join(line[self.__room_view_left: self.__room_view_right]), curses.color_pair(0))
-                # TODO: render object list
-                # TODO: render info
+
+                # render mini map
+                for y, line in enumerate(self.__room_view.get_mini_map()):
+                    screen.addstr(self.__room_display_top + self.__room_display_height + 2 + y,
+                                  self.__room_display_left,
+                                  line, curses.color_pair(0))
+
+                # render object list
+                for y, obj in enumerate(self.__room_object_info):
+                    screen.addstr(self.__room_display_top + self.__room_display_height + 2 + y,
+                                  self.__room_display_left + 26 + 3,
+                                  obj["type"],
+                                  curses.color_pair(2) if y == self.__room_object_selected else curses.color_pair(0))
+
+                # render info
                 if len(self.__room_object_info) > 0:
                     # log(json.dumps(self.__room_object_info[0], indent=4, sort_keys=True))
-                    info_list = json.dumps(self.__room_object_info, indent=4, sort_keys=True).splitlines()
+                    info_list = json.dumps(self.__room_object_info[self.__room_object_selected],
+                                           indent=4, sort_keys=True).splitlines()
                     for y, line in enumerate(info_list[: self.__screen_height - 5]):
-                        screen.addstr(2 + y, 55,
+                        screen.addstr(4 + y, 55,
                                       line[:self.__screen_width - 55], curses.color_pair(0))
 
                 screen.move(self.__cursor_y, self.__cursor_x)
@@ -344,6 +438,8 @@ class Render(object):
                 else:
                     index_start = self.__log_index
                 for i in range(index_start, index_start + index_range):
+                    if i >= len(log_list):  # BUG: index_start + index_range > len(log_list)
+                        break
                     # log("{} {} {}".format(i, log_list[i]["type"], log_list[i]["log"]))
                     if log_list[i]["type"] == "error":
                         screen.addstr(1 + i - index_start, 0, log_list[i]["log"], curses.color_pair(3))
@@ -403,45 +499,191 @@ class Render(object):
             if self.__cursor_x in range(self.__room_display_left,
                                         self.__room_display_left + self.__room_display_width) \
                     and self.__cursor_y in range(self.__room_display_top,
-                                                 self.__room_display_top + self.__room_display_height):
-                if event.name == "left":
-                    self.__cursor_x = max(0, self.__cursor_x - 1)
+                                                 self.__room_display_top + self.__room_display_height) \
+                    and event.name.lower() in "hjklyubn":
+                if event.name.lower() == "h":  # left
+                    if keyboard.is_pressed("ctrl"):
+                        self.__room_view.change_room("west")
+                    elif keyboard.is_pressed("shift"):
+                        self.__cursor_x = max(self.__room_display_left,
+                                              self.__cursor_x - self.__shift_step)
+                    else:
+                        self.__cursor_x = max(self.__room_display_left, self.__cursor_x - 1)
                     # if self.__cursor_x - 3 < 5:
                     #     self.__room_view_left = max(0, self.__room_view_left - 1)
                     #     self.__room_view_right = max(30, self.__room_view_right - 1)
-                if event.name == "right":
-                    self.__cursor_x = min(self.__screen_width - 1, self.__cursor_x + 1)
+                if event.name.lower() == "l":  # right
+                    if keyboard.is_pressed("ctrl"):
+                        self.__room_view.change_room("east")
+                    elif keyboard.is_pressed("shift"):
+                        self.__cursor_x = min(self.__room_display_left + self.__room_display_width - 1,
+                                              self.__cursor_x + self.__shift_step)
+                    else:
+                        self.__cursor_x = min(self.__room_display_left + self.__room_display_width - 1,
+                                              self.__cursor_x + 1)
                     # if 33 - self.__cursor_x < 5:
                     #     self.__room_view_left = min(20, self.__room_view_left + 1)
                     #     self.__room_view_right = min(50, self.__room_view_right + 1)
-                if event.name == "up":
-                    if self.__room_display_top == self.__cursor_y \
-                            and self.__room_view_top > 0:
-                        self.__room_view_top = max(0, self.__room_view_top - 1)
-                        self.__room_view_bottom = max(self.__room_display_height, self.__room_view_bottom - 1)
+                if event.name.lower() == "k":  # up
+                    if keyboard.is_pressed("ctrl"):
+                        self.__room_view.change_room("north")
+                    elif keyboard.is_pressed("shift"):
+                        if self.__room_display_top == self.__cursor_y \
+                                and self.__room_view_top > 0:
+                            self.__room_view_top = max(0, self.__room_view_top - self.__shift_step)
+                            self.__room_view_bottom = max(self.__room_display_height,
+                                                          self.__room_view_bottom - self.__shift_step)
+                        else:
+                            self.__cursor_y = max(self.__room_display_top,
+                                                  self.__cursor_y - self.__shift_step)
                     else:
-                        self.__cursor_y = max(0, self.__cursor_y - 1)
-                if event.name == "down":
-                    if self.__room_display_top + self.__room_display_height - 1 == self.__cursor_y \
-                            and self.__room_view_bottom < self.__room_max_height:
-                        self.__room_view_top = min(self.__room_max_height - self.__room_display_height,
-                                                   self.__room_view_top + 1)
-                        self.__room_view_bottom = min(self.__room_max_height, self.__room_view_bottom + 1)
+                        if self.__room_display_top == self.__cursor_y \
+                                and self.__room_view_top > 0:
+                            self.__room_view_top = max(0, self.__room_view_top - 1)
+                            self.__room_view_bottom = max(self.__room_display_height, self.__room_view_bottom - 1)
+                        else:
+                            self.__cursor_y = max(self.__room_display_top, self.__cursor_y - 1)
+                if event.name.lower() == "j":  # down
+                    if keyboard.is_pressed("ctrl"):
+                        self.__room_view.change_room("south")
+                    elif keyboard.is_pressed("shift"):
+                        if self.__room_display_top + self.__room_display_height - 1 == self.__cursor_y \
+                                and self.__room_view_bottom < self.__room_max_height:
+                            self.__room_view_top = min(self.__room_max_height - self.__room_display_height,
+                                                       self.__room_view_top + self.__shift_step)
+                            self.__room_view_bottom = min(self.__room_max_height,
+                                                          self.__room_view_bottom + self.__shift_step)
+                        else:
+                            self.__cursor_y = min(self.__room_display_top + self.__room_display_height - 1,
+                                                  self.__cursor_y + self.__shift_step)
                     else:
-                        self.__cursor_y = min(self.__screen_height - 1, self.__cursor_y + 1)
+                        if self.__room_display_top + self.__room_display_height - 1 == self.__cursor_y \
+                                and self.__room_view_bottom < self.__room_max_height:
+                            self.__room_view_top = min(self.__room_max_height - self.__room_display_height,
+                                                       self.__room_view_top + 1)
+                            self.__room_view_bottom = min(self.__room_max_height, self.__room_view_bottom + 1)
+                        else:
+                            self.__cursor_y = min(self.__room_display_top + self.__room_display_height - 1,
+                                                  self.__cursor_y + 1)
+
+                if event.name.lower() == "y":  # up left
+                    if keyboard.is_pressed("ctrl"):
+                        self.__room_view.change_room("north", "west")
+                    elif keyboard.is_pressed("shift"):
+                        if self.__room_display_top == self.__cursor_y \
+                                and self.__room_view_top > 0:
+                            self.__room_view_top = max(0, self.__room_view_top - self.__shift_step)
+                            self.__room_view_bottom = max(self.__room_display_height,
+                                                          self.__room_view_bottom - self.__shift_step)
+                        else:
+                            self.__cursor_y = max(self.__room_display_top,
+                                                  self.__cursor_y - self.__shift_step)
+                        self.__cursor_x = max(self.__room_display_left,
+                                              self.__cursor_x - self.__shift_step)
+                    else:
+                        if self.__room_display_top == self.__cursor_y \
+                                and self.__room_view_top > 0:
+                            self.__room_view_top = max(0, self.__room_view_top - 1)
+                            self.__room_view_bottom = max(self.__room_display_height, self.__room_view_bottom - 1)
+                        else:
+                            self.__cursor_y = max(self.__room_display_top, self.__cursor_y - 1)
+                        self.__cursor_x = max(self.__room_display_left, self.__cursor_x - 1)
+
+                if event.name.lower() == "u":  # up right
+                    if keyboard.is_pressed("ctrl"):
+                        self.__room_view.change_room("north", "east")
+                    elif keyboard.is_pressed("shift"):
+                        if self.__room_display_top == self.__cursor_y \
+                                and self.__room_view_top > 0:
+                            self.__room_view_top = max(0, self.__room_view_top - self.__shift_step)
+                            self.__room_view_bottom = max(self.__room_display_height,
+                                                          self.__room_view_bottom - self.__shift_step)
+                        else:
+                            self.__cursor_y = max(self.__room_display_top,
+                                                  self.__cursor_y - self.__shift_step)
+                        self.__cursor_x = min(self.__room_display_left + self.__room_display_width - 1,
+                                              self.__cursor_x + self.__shift_step)
+                    else:
+                        if self.__room_display_top == self.__cursor_y \
+                                and self.__room_view_top > 0:
+                            self.__room_view_top = max(0, self.__room_view_top - 1)
+                            self.__room_view_bottom = max(self.__room_display_height, self.__room_view_bottom - 1)
+                        else:
+                            self.__cursor_y = max(self.__room_display_top, self.__cursor_y - 1)
+                        self.__cursor_x = min(self.__room_display_left + self.__room_display_width - 1,
+                                              self.__cursor_x + 1)
+
+                if event.name.lower() == "b":  # down left
+                    if keyboard.is_pressed("ctrl"):
+                        self.__room_view.change_room("south", "west")
+                    elif keyboard.is_pressed("shift"):
+                        if self.__room_display_top + self.__room_display_height - 1 == self.__cursor_y \
+                                and self.__room_view_bottom < self.__room_max_height:
+                            self.__room_view_top = min(self.__room_max_height - self.__room_display_height,
+                                                       self.__room_view_top + self.__shift_step)
+                            self.__room_view_bottom = min(self.__room_max_height,
+                                                          self.__room_view_bottom + self.__shift_step)
+                        else:
+                            self.__cursor_y = min(self.__room_display_top + self.__room_display_height - 1,
+                                                  self.__cursor_y + self.__shift_step)
+                        self.__cursor_x = max(self.__room_display_left,
+                                              self.__cursor_x - self.__shift_step)
+                    else:
+                        if self.__room_display_top + self.__room_display_height - 1 == self.__cursor_y \
+                                and self.__room_view_bottom < self.__room_max_height:
+                            self.__room_view_top = min(self.__room_max_height - self.__room_display_height,
+                                                       self.__room_view_top + 1)
+                            self.__room_view_bottom = min(self.__room_max_height, self.__room_view_bottom + 1)
+                        else:
+                            self.__cursor_y = min(self.__room_display_top + self.__room_display_height - 1,
+                                                  self.__cursor_y + 1)
+                        self.__cursor_x = max(self.__room_display_left, self.__cursor_x - 1)
+
+                if event.name.lower() == "n":  # down right
+                    if keyboard.is_pressed("ctrl"):
+                        self.__room_view.change_room("south", "east")
+                    elif keyboard.is_pressed("shift"):
+                        if self.__room_display_top + self.__room_display_height - 1 == self.__cursor_y \
+                                and self.__room_view_bottom < self.__room_max_height:
+                            self.__room_view_top = min(self.__room_max_height - self.__room_display_height,
+                                                       self.__room_view_top + self.__shift_step)
+                            self.__room_view_bottom = min(self.__room_max_height,
+                                                          self.__room_view_bottom + self.__shift_step)
+                        else:
+                            self.__cursor_y = min(self.__room_display_top + self.__room_display_height - 1,
+                                                  self.__cursor_y + self.__shift_step)
+                        self.__cursor_x = min(self.__room_display_left + self.__room_display_width - 1,
+                                              self.__cursor_x + self.__shift_step)
+                    else:
+                        if self.__room_display_top + self.__room_display_height - 1 == self.__cursor_y \
+                                and self.__room_view_bottom < self.__room_max_height:
+                            self.__room_view_top = min(self.__room_max_height - self.__room_display_height,
+                                                       self.__room_view_top + 1)
+                            self.__room_view_bottom = min(self.__room_max_height, self.__room_view_bottom + 1)
+                        else:
+                            self.__cursor_y = min(self.__room_display_top + self.__room_display_height - 1,
+                                                  self.__cursor_y + 1)
+                        self.__cursor_x = min(self.__room_display_left + self.__room_display_width - 1,
+                                              self.__cursor_x + 1)
 
                 self.__room_object_info = self.__room_view.get_info(
                         self.__cursor_x - self.__room_display_left + self.__room_view_left,
                         self.__cursor_y - self.__room_display_top + self.__room_view_top)
-            else:
-                if event.name == "left":
-                    self.__cursor_x = max(0, self.__cursor_x - 1)
-                if event.name == "right":
-                    self.__cursor_x = min(self.__screen_width - 1, self.__cursor_x + 1)
-                if event.name == "up":
-                    self.__cursor_y = max(0, self.__cursor_y - 1)
-                if event.name == "down":
-                    self.__cursor_y = min(self.__screen_height - 1, self.__cursor_y + 1)
+                self.__room_object_selected = self.__room_object_selected \
+                    if self.__room_object_selected < len(self.__room_object_info) else 0
+
+            if event.name == "tab":
+                if len(self.__room_object_info) > 0:
+                    self.__room_object_selected = (self.__room_object_selected + 1) % len(self.__room_object_info)
+            # else:
+            #     if event.name == "left":
+            #         self.__cursor_x = max(0, self.__cursor_x - 1)
+            #     if event.name == "right":
+            #         self.__cursor_x = min(self.__screen_width - 1, self.__cursor_x + 1)
+            #     if event.name == "up":
+            #         self.__cursor_y = max(0, self.__cursor_y - 1)
+            #     if event.name == "down":
+            #         self.__cursor_y = min(self.__screen_height - 1, self.__cursor_y + 1)
         elif self.__panel == "console":
             log_max_display_height = (self.__screen_height - 2) // 2
             log_len = len(self.__log_view.get_log())
@@ -517,9 +759,42 @@ class Render(object):
                 self.__cursor_pos = len(self.__cmd)
 
 
-def log(line, filename="log"):
-    with open(filename, "a") as f:
-        f.write(line + "\n")
+def log(*args):
+    time_mark = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+    with open("log", "a") as f:
+        f.write(time_mark)
+        for i, v in enumerate(args):
+            if i > 0:
+                f.write(" ")
+            if type(v) in [bool, int, str, unicode]:
+                f.write("{}".format(v))
+            elif type(v) in [list, dict, tuple, map]:
+                f.write("{}".format(json.dumps(v)))
+            else:
+                f.write("{}".format(type(v)))
+        f.write("\n")
+
+
+def exception_hook(exc_type, exc_value, tb):
+    msg = "Traceback (most recent call last):\n"
+    while tb is not None:
+        frame = tb.tb_frame
+        line_no = tb.tb_lineno
+        code = frame.f_code
+        filename = code.co_filename
+        name = code.co_name
+        linecache.checkcache(filename)
+        line = linecache.getline(filename, line_no, frame.f_globals)
+        if line:
+            line = line.strip()
+        else:
+            line = None
+        msg += "\tFile \"{}\", line {}, in {}\n".format(filename, line_no, name)
+        msg += "\t\t{}\n".format(line)
+        tb = tb.tb_next
+    msg += "{}: {}\n".format(exc_type.__name__, exc_value)
+    log(msg)
+    keyboard.unhook_all()
 
 
 def keyboard_event_test(x):
@@ -528,14 +803,15 @@ def keyboard_event_test(x):
 
 
 if __name__ == "__main__":
-    # main()
-
     # keyboard.on_press(lambda event: keyboard_event_test(event))
     # while True:
     #     pass
 
     if sys.platform == "win32":
         os.system("title screeps-client")
+        os.system("mode con: cols=120 lines=50")
+
+    sys.excepthook = exception_hook
 
     render = Render()
     render.start()

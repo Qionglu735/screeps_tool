@@ -179,6 +179,9 @@ class Api(object):
     def get_user_memory(self):
         return self.get("/api/user/memory").json()
 
+    def get_user_overview(self):
+        return self.get("/api/user/overview").json()
+
     def get_time(self):
         return self.get("/api/game/time").json()
 
