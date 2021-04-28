@@ -9,26 +9,14 @@ import linecache
 import keyboard
 import re
 import os
+import pyperclip
 import sys
 
+import config
 import screeps_api
 
 
-def clear_output():
-    os.system("cls" if os.name == "nt" else "clear")
-
-
-def flush_input():
-    try:
-        import msvcrt
-        while msvcrt.kbhit():
-            msvcrt.getch()
-    except ImportError:
-        import termios
-        termios.tcflush(sys.stdin, termios.TCIOFLUSH)
-
-
-class RoomView(object):
+class MapView(object):
 
     def __init__(self):
         self.__room_matrix = [["." for _ in range(50)] for _ in range(50)]
@@ -68,36 +56,16 @@ class RoomView(object):
         self.__refresh_data()
 
     def __refresh_data(self):
-        self.__room_matrix = [["." for _ in range(50)] for _ in range(50)]
+        self.__room_matrix = [[config.CHAR_MAP["plain"] for _ in range(50)] for _ in range(50)]
         api = screeps_api.Api()
         terrain_data = api.get_room_terrain(self.room_name)["terrain"]
         for i in terrain_data:
-            if i["type"] == "wall":
-                self.__room_matrix[int(i["y"])][int(i["x"])] = "#"
-            elif i["type"] == "swamp":
-                self.__room_matrix[int(i["y"])][int(i["x"])] = ":"
-            else:
-                self.__room_matrix[int(i["y"])][int(i["x"])] = "?"
+            self.__room_matrix[int(i["y"])][int(i["x"])] = config.CHAR_MAP[i["type"]] \
+                if i["type"] in config.CHAR_MAP else "?"
         for i, item in self.__room_object.items():
-            char_map = {
-                "source": "$",
-                "mineral": "&",
-                "creep": "@",
-                "tombstone": "M",
-                "controller": "C",
-                "spawn": "W",
-                "tower": "T",
-                "container": "N",
-                "extension": "X",
-                "storage": "R",
-                "constructionSite": "S",
-                "ruin": "U",
-                "road": "o",
-                "energy": "e",
-            }
             if item["room"] == self.room_name:
-                self.__room_matrix[int(item["y"])][int(item["x"])] = char_map[item["type"]] \
-                    if item["type"] in char_map else "?"
+                self.__room_matrix[int(item["y"])][int(item["x"])] = config.CHAR_MAP[item["type"]] \
+                    if item["type"] in config.CHAR_MAP else "?"
         # for i in self.__room_matrix:
         #     log("".join(i))
 
@@ -107,29 +75,20 @@ class RoomView(object):
     def get_info(self, x, y):
         info_list = list()
         for i, item in self.__room_object.items():
-            if item["x"] == x and item["y"] == y:
+            if item["room"] == self.room_name and item["x"] == x and item["y"] == y:
                 log(json.dumps(item))
                 info = copy.deepcopy(item)
-                body_part_dict = {
-                    "move": "M",
-                    "work": "W",
-                    "carry": "C",
-                    "attack": "A",
-                    "range_attack": "R",
-                    "heal": "H",
-                    "claim": "L",
-                    "tough": "T",
-                }
                 if "body" in info:
                     body = list()
                     for part in info["body"]:
-                        log(part["type"])
-                        body.append(body_part_dict[part["type"]])
+                        body.append(config.CHAR_BODY_PART[part["type"]]
+                                    if part["type"] in config.CHAR_BODY_PART else "?")
                     info["body"] = "".join(body)
                 if "creepBody" in info:
                     body = list()
                     for part in info["creepBody"]:
-                        body.append(body_part_dict[part])
+                        body.append(config.CHAR_BODY_PART[part]
+                                    if part["type"] in config.CHAR_BODY_PART else "?")
                     info["creepBody"] = "".join(body)
                 for key in ["meta", "$loki", "actionLog"]:
                     if key in info:
@@ -207,7 +166,7 @@ class RoomView(object):
         return "".join(room_name_list)
 
 
-class LogView(object):
+class ConsoleView(object):
 
     def __init__(self):
         self.line_length = 80
@@ -316,10 +275,10 @@ class Render(object):
         self.__panel = "console"
 
         # Map Panel
+        self.__map_view = MapView()
         self.__room_display_left, self.__room_display_top = 2, 4
         self.__room_display_width, self.__room_display_height = 50, 30
         self.__room_max_width, self.__room_max_height = 50, 50
-        self.__room_view = RoomView()
         self.__room_view_left, self.__room_view_right = 0, self.__room_display_width
         self.__room_view_top, self.__room_view_bottom = 0, self.__room_display_height
         self.__room_object_info = list()
@@ -329,7 +288,7 @@ class Render(object):
         self.__shift_step = 5
 
         # Console Panel
-        self.__log_view = LogView()
+        self.__console_view = ConsoleView()
         self.__log_index = -1
         self.__cmd = ""
         self.__cursor_pos = 0
@@ -341,8 +300,8 @@ class Render(object):
         self.map_source = None
 
     def start(self):
-        self.__room_view.watch()
-        self.__log_view.watch()
+        self.__map_view.watch()
+        self.__console_view.watch()
         curses.wrapper(self.display)
 
     def stop(self):
@@ -356,7 +315,7 @@ class Render(object):
         self.__screen_height, self.__screen_width = screen.getmaxyx()
         # screen.refresh()
 
-        self.__log_view.line_length = self.__screen_width
+        self.__console_view.line_length = self.__screen_width
 
         # Start colors in curses
         curses.start_color()
@@ -397,15 +356,15 @@ class Render(object):
 
             if self.__panel == "map":
                 # render room info
-                screen.addstr(2, 2, self.__room_view.room_name, curses.color_pair(0))
+                screen.addstr(2, 2, self.__map_view.room_name, curses.color_pair(0))
 
                 # render room detail
-                for y, line in enumerate(self.__room_view.get_matrix()[self.__room_view_top: self.__room_view_bottom]):
+                for y, line in enumerate(self.__map_view.get_matrix()[self.__room_view_top: self.__room_view_bottom]):
                     screen.addstr(self.__room_display_top + y, self.__room_display_left,
                                   "".join(line[self.__room_view_left: self.__room_view_right]), curses.color_pair(0))
 
                 # render mini map
-                for y, line in enumerate(self.__room_view.get_mini_map()):
+                for y, line in enumerate(self.__map_view.get_mini_map()):
                     screen.addstr(self.__room_display_top + self.__room_display_height + 2 + y,
                                   self.__room_display_left,
                                   line, curses.color_pair(0))
@@ -429,7 +388,7 @@ class Render(object):
                 screen.move(self.__cursor_y, self.__cursor_x)
 
             elif self.__panel == "console":
-                log_list = self.__log_view.get_log()
+                log_list = self.__console_view.get_log()
                 index_range = self.__screen_height - 2 if len(log_list) > self.__screen_height else len(log_list)
                 if len(log_list) <= self.__screen_height - 2:
                     index_start = 0
@@ -461,8 +420,8 @@ class Render(object):
             # Refresh the screen
             screen.refresh()
 
-        self.__room_view.stop()
-        self.__log_view.stop()
+        self.__map_view.stop()
+        self.__console_view.stop()
 
     def keyboard_handler(self, event):
         # https://stackoverflow.com/questions/10266281/obtain-active-window-using-python
@@ -472,7 +431,7 @@ class Render(object):
                 return
 
         # clear_output()
-        # log(event.name)
+        log(event.name)
 
         if event.name == "1" and keyboard.is_pressed("ctrl"):
             self.__panel = "map"
@@ -492,18 +451,18 @@ class Render(object):
                 self.__pause = not self.__pause
 
             if event.name == "r":
-                self.__room_view.stop()
-                self.__room_view = RoomView()
-                self.__room_view.watch()
+                self.__map_view.stop()
+                self.__map_view = MapView()
+                self.__map_view.watch()
 
-            if self.__cursor_x in range(self.__room_display_left,
-                                        self.__room_display_left + self.__room_display_width) \
+            if event.name.lower() in "hjklyubn" \
+                    and self.__cursor_x in range(self.__room_display_left,
+                                                 self.__room_display_left + self.__room_display_width) \
                     and self.__cursor_y in range(self.__room_display_top,
-                                                 self.__room_display_top + self.__room_display_height) \
-                    and event.name.lower() in "hjklyubn":
+                                                 self.__room_display_top + self.__room_display_height):
                 if event.name.lower() == "h":  # left
                     if keyboard.is_pressed("ctrl"):
-                        self.__room_view.change_room("west")
+                        self.__map_view.change_room("west")
                     elif keyboard.is_pressed("shift"):
                         self.__cursor_x = max(self.__room_display_left,
                                               self.__cursor_x - self.__shift_step)
@@ -514,7 +473,7 @@ class Render(object):
                     #     self.__room_view_right = max(30, self.__room_view_right - 1)
                 if event.name.lower() == "l":  # right
                     if keyboard.is_pressed("ctrl"):
-                        self.__room_view.change_room("east")
+                        self.__map_view.change_room("east")
                     elif keyboard.is_pressed("shift"):
                         self.__cursor_x = min(self.__room_display_left + self.__room_display_width - 1,
                                               self.__cursor_x + self.__shift_step)
@@ -526,7 +485,7 @@ class Render(object):
                     #     self.__room_view_right = min(50, self.__room_view_right + 1)
                 if event.name.lower() == "k":  # up
                     if keyboard.is_pressed("ctrl"):
-                        self.__room_view.change_room("north")
+                        self.__map_view.change_room("north")
                     elif keyboard.is_pressed("shift"):
                         if self.__room_display_top == self.__cursor_y \
                                 and self.__room_view_top > 0:
@@ -545,7 +504,7 @@ class Render(object):
                             self.__cursor_y = max(self.__room_display_top, self.__cursor_y - 1)
                 if event.name.lower() == "j":  # down
                     if keyboard.is_pressed("ctrl"):
-                        self.__room_view.change_room("south")
+                        self.__map_view.change_room("south")
                     elif keyboard.is_pressed("shift"):
                         if self.__room_display_top + self.__room_display_height - 1 == self.__cursor_y \
                                 and self.__room_view_bottom < self.__room_max_height:
@@ -568,7 +527,7 @@ class Render(object):
 
                 if event.name.lower() == "y":  # up left
                     if keyboard.is_pressed("ctrl"):
-                        self.__room_view.change_room("north", "west")
+                        self.__map_view.change_room("north", "west")
                     elif keyboard.is_pressed("shift"):
                         if self.__room_display_top == self.__cursor_y \
                                 and self.__room_view_top > 0:
@@ -591,7 +550,7 @@ class Render(object):
 
                 if event.name.lower() == "u":  # up right
                     if keyboard.is_pressed("ctrl"):
-                        self.__room_view.change_room("north", "east")
+                        self.__map_view.change_room("north", "east")
                     elif keyboard.is_pressed("shift"):
                         if self.__room_display_top == self.__cursor_y \
                                 and self.__room_view_top > 0:
@@ -615,7 +574,7 @@ class Render(object):
 
                 if event.name.lower() == "b":  # down left
                     if keyboard.is_pressed("ctrl"):
-                        self.__room_view.change_room("south", "west")
+                        self.__map_view.change_room("south", "west")
                     elif keyboard.is_pressed("shift"):
                         if self.__room_display_top + self.__room_display_height - 1 == self.__cursor_y \
                                 and self.__room_view_bottom < self.__room_max_height:
@@ -641,7 +600,7 @@ class Render(object):
 
                 if event.name.lower() == "n":  # down right
                     if keyboard.is_pressed("ctrl"):
-                        self.__room_view.change_room("south", "east")
+                        self.__map_view.change_room("south", "east")
                     elif keyboard.is_pressed("shift"):
                         if self.__room_display_top + self.__room_display_height - 1 == self.__cursor_y \
                                 and self.__room_view_bottom < self.__room_max_height:
@@ -666,9 +625,9 @@ class Render(object):
                         self.__cursor_x = min(self.__room_display_left + self.__room_display_width - 1,
                                               self.__cursor_x + 1)
 
-                self.__room_object_info = self.__room_view.get_info(
-                        self.__cursor_x - self.__room_display_left + self.__room_view_left,
-                        self.__cursor_y - self.__room_display_top + self.__room_view_top)
+                self.__room_object_info = self.__map_view.get_info(
+                    self.__cursor_x - self.__room_display_left + self.__room_view_left,
+                    self.__cursor_y - self.__room_display_top + self.__room_view_top)
                 self.__room_object_selected = self.__room_object_selected \
                     if self.__room_object_selected < len(self.__room_object_info) else 0
 
@@ -686,7 +645,7 @@ class Render(object):
             #         self.__cursor_y = min(self.__screen_height - 1, self.__cursor_y + 1)
         elif self.__panel == "console":
             log_max_display_height = (self.__screen_height - 2) // 2
-            log_len = len(self.__log_view.get_log())
+            log_len = len(self.__console_view.get_log())
             if event.name == "page up":
                 if self.__log_index == -1:
                     self.__log_index = log_len - log_max_display_height if log_len > log_max_display_height else 0
@@ -704,6 +663,14 @@ class Render(object):
                     self.__cmd_left += 1
                 else:
                     self.__cursor_pos += 1
+            if event.name.lower() == "insert" and keyboard.is_pressed("shift"):
+                text = pyperclip.paste().replace("\n", "").replace("\r", "")
+                self.__cmd = self.__cmd[0: self.__cmd_left + self.__cursor_pos] + text \
+                             + self.__cmd[self.__cmd_left + self.__cursor_pos:]
+                if len(self.__cmd) - self.__cmd_left > cmd_max_display_length:
+                    self.__cmd_left += len(text)
+                else:
+                    self.__cursor_pos += len(text)
             if event.name == "space":
                 self.__cmd = self.__cmd[0: self.__cmd_left + self.__cursor_pos] + " " \
                              + self.__cmd[self.__cmd_left + self.__cursor_pos:]
@@ -714,7 +681,7 @@ class Render(object):
                                  self.__cmd[self.__cmd_left + self.__cursor_pos:]
                     self.__cursor_pos -= 1
             if event.name == "delete":
-                if  self.__cmd_left + self.__cursor_pos < len(self.__cmd):
+                if self.__cmd_left + self.__cursor_pos < len(self.__cmd):
                     self.__cmd = self.__cmd[0: self.__cmd_left + self.__cursor_pos] + \
                                  self.__cmd[self.__cmd_left + self.__cursor_pos + 1:]
             if event.name == "left":
@@ -736,7 +703,7 @@ class Render(object):
                 self.__cursor_pos = len(self.__cmd) - self.__cmd_left
             if event.name == "enter":
                 if self.__cmd != "":
-                    self.__log_view.send_cmd(self.__cmd)
+                    self.__console_view.send_cmd(self.__cmd)
                     self.__cmd_history.append(self.__cmd)
                     if len(self.__cmd_history) > self.__cmd_history_max:
                         self.__cmd_history = self.__cmd_history[len(self.__cmd_history) - self.__cmd_history_max:]
@@ -797,9 +764,23 @@ def exception_hook(exc_type, exc_value, tb):
     keyboard.unhook_all()
 
 
+def clear_output():
+    os.system("cls" if os.name == "nt" else "clear")
+
+
+def flush_input():
+    try:
+        import msvcrt
+        while msvcrt.kbhit():
+            msvcrt.getch()
+    except ImportError:
+        import termios
+        termios.tcflush(sys.stdin, termios.TCIOFLUSH)
+
+
 def keyboard_event_test(x):
     clear_output()
-    print(x.to_json(), keyboard.is_pressed("ctrl"))
+    print(x.to_json(), keyboard.is_pressed("ctrl"), keyboard.is_pressed("shift"), keyboard.is_pressed("alt"))
 
 
 if __name__ == "__main__":
@@ -818,5 +799,3 @@ if __name__ == "__main__":
 
     keyboard.unhook_all()
     flush_input()
-
-
