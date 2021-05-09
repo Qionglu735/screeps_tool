@@ -1,5 +1,5 @@
 
-# Screeps Tool Set For Private Server
+# Screeps Client For Private Server
 
 ---
 
@@ -7,7 +7,7 @@
 
 Console client with ASCII map and log tracking etc.
 
-Based on [HTTP Endpoints](https://github.com/screepers/python-screeps/blob/master/docs/Endpoints.md) 
+Based on [private_server_backend](https://github.com/screeps/backend-local/tree/master/lib/game)
 and [Websocket endpoints](https://github.com/screepers/node-screeps-api/blob/master/docs/Websocket_endpoints.md).
 
 _I have not figured out how to authenticate with official server.
@@ -64,11 +64,9 @@ Ctrl+HJKLYUBN: change room
 
 Tab: switch between objects on the same tile
 
+Enter: open an operation menu, for creating construction site, etc (TODO)
+
 Map character could be changed in config.py.
-
-##### TODO
-
-create construction site on map
 
 ---
 
@@ -76,7 +74,7 @@ create construction site on map
 
 PageUp PageDown: scroll console log
 
-↑ ↓: scroll command history
+↑↓: scroll command history
 
 Enter: send command
 
