@@ -44,27 +44,27 @@ _DB\_ setting is not used, just leave it blank._
 
     python screeps_client.py
 
-Ctrl+1: Map
+**F1**: Map
 
-Ctrl+2: Console
+**F2**: Console
 
-##### TODO
+**F3**: Memory(TODO)
 
-Ctrl+3: Memory
+**ESC**: Exit
 
 ---
 
 #### 1.3.1 Map
 
-HJKLYUBN: move around in room
+**HJKLYUBN**: move around in room
 
-Shift+HJKLYUBN: move faster
+**Shift+HJKLYUBN**: move faster
 
-Ctrl+HJKLYUBN: change room
+**Ctrl+HJKLYUBN**: change room
 
-Tab: switch between objects on the same tile
+**Tab**: switch between objects on the same tile
 
-Enter: open an operation menu, for creating construction site, etc (TODO)
+**Enter**: open an operation menu, for creating construction site, etc(TODO)
 
 Map character could be changed in config.py.
 
@@ -72,13 +72,13 @@ Map character could be changed in config.py.
 
 #### 1.3.2 Console
 
-PageUp PageDown: scroll console log
+**PageUp/PageDown**: scroll console log
 
-↑↓: scroll command history
+**↑↓**: scroll command history
 
-Enter: send command
+**Enter**: send command
 
-Shift+Insert: Paste
+**Shift+Insert**: Paste
 
 ---
 
