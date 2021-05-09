@@ -20,16 +20,111 @@ class MapView(object):
 
     def __init__(self):
         self.__room_matrix = [["." for _ in range(50)] for _ in range(50)]
-        self.room_name = None
-        api = screeps_api.Api()
-        user_room_list = api.get_user_overview()["rooms"]
-        if len(user_room_list) > 0:
-            self.room_name = user_room_list[0]
+        self.room_name = ""
+        self.__api = screeps_api.Api(config.SERVER_HOST, config.SERVER_PORT, config.USERNAME, config.PASSWORD)
+        # user_room_list = api.get_user_overview()["rooms"]
+        # if len(user_room_list) > 0:
+        #     self.room_name = user_room_list[0]
+        start_room_info = self.__api.get_start_room()
+        if "room" in start_room_info:
+            self.room_name = self.__api.get_start_room()["room"][0]
         self.__room_object = dict()
         self.__socket = None
 
+        self.room_x = 24
+        self.room_y = 15
+
+        self.__confirm_menu_template = [
+            {
+                "item": "CANCEL",
+                "sub_menu": None,
+            },
+            {
+                "item": "CONFIRM",
+                "sub_menu": None,
+            },
+        ]
+        self.operate_menu = {
+            "item": "operation_menu",
+            "sub_menu": [
+                {
+                    "item": "Place spawn",
+                    "sub_menu": self.__confirm_menu_template,
+                },
+                {
+                    "item": "Create Construction Site",
+                    "sub_menu": [
+                        {
+                            "item": "road",
+                            "sub_menu": self.__confirm_menu_template,
+                        },
+                        {
+                            "item": "container",
+                            "sub_menu": self.__confirm_menu_template,
+                        },
+                        {
+                            "item": "extension",
+                            "sub_menu": self.__confirm_menu_template,
+                        },
+                        {
+                            "item": "rampart",
+                            "sub_menu": self.__confirm_menu_template,
+                        },
+                        {
+                            "item": "tower",
+                            "sub_menu": self.__confirm_menu_template,
+                        },
+                        {
+                            "item": "storage",
+                            "sub_menu": self.__confirm_menu_template,
+                        },
+                        {
+                            "item": "link",
+                            "sub_menu": self.__confirm_menu_template,
+                        },
+                        {
+                            "item": "extractor",
+                            "sub_menu": self.__confirm_menu_template,
+                        },
+                        {
+                            "item": "lab",
+                            "sub_menu": self.__confirm_menu_template,
+                        },
+                        {
+                            "item": "terminal",
+                            "sub_menu": self.__confirm_menu_template,
+                        },
+                        {
+                            "item": "spawn",
+                            "sub_menu": self.__confirm_menu_template,
+                        },
+                        {
+                            "item": "observer",
+                            "sub_menu": self.__confirm_menu_template,
+                        },
+                        {
+                            "item": "powerSpawn",
+                            "sub_menu": self.__confirm_menu_template,
+                        },
+                    ],
+                },
+                {
+                    "item": "Create Flag",
+                    "sub_menu": self.__confirm_menu_template,
+                },
+                {
+                    "item": "Delete",
+                    "sub_menu": self.__confirm_menu_template,
+                },
+            ]
+        }
+        self.current_menu = None
+        self.menu_depth = -1
+        self.menu_path = list()
+        self.menu_selected = 0
+
     def watch(self):
-        self.__socket = screeps_api.Socket()
+        self.__socket = screeps_api.Socket(config.SERVER_HOST, config.SERVER_PORT, config.USERNAME, config.PASSWORD)
         self.__socket.subscribe("room", self.room_name)
         self.__socket.callback = self.__room_callback
         self.__socket.start()
@@ -57,7 +152,7 @@ class MapView(object):
 
     def __refresh_data(self):
         self.__room_matrix = [[config.CHAR_MAP["plain"] for _ in range(50)] for _ in range(50)]
-        api = screeps_api.Api()
+        api = screeps_api.Api(config.SERVER_HOST, config.SERVER_PORT, config.USERNAME, config.PASSWORD)
         terrain_data = api.get_room_terrain(self.room_name)["terrain"]
         for i in terrain_data:
             self.__room_matrix[int(i["y"])][int(i["x"])] = config.CHAR_MAP[i["type"]] \
@@ -72,11 +167,11 @@ class MapView(object):
     def get_matrix(self):
         return self.__room_matrix
 
-    def get_info(self, x, y):
+    def get_info(self):
         info_list = list()
         for i, item in self.__room_object.items():
-            if item["room"] == self.room_name and item["x"] == x and item["y"] == y:
-                log(json.dumps(item))
+            if item["room"] == self.room_name and item["x"] == self.room_x and item["y"] == self.room_y:
+                # log(json.dumps(item))
                 info = copy.deepcopy(item)
                 if "body" in info:
                     body = list()
@@ -123,7 +218,10 @@ class MapView(object):
         return minimap
 
     def __convert_room_name(self, direction_1, direction_2=""):
-        room_name_list = list(re.match(r"(\w)(\d+)(\w)(\d+)", self.room_name).groups())
+        re_res = re.match(r"(\w)(\d+)(\w)(\d+)", self.room_name)
+        if re_res is None:
+            return ""
+        room_name_list = list(re_res.groups())
         room_name_list[1] = int(room_name_list[1])
         room_name_list[3] = int(room_name_list[3])
         for direction in [direction_1, direction_2]:
@@ -165,14 +263,72 @@ class MapView(object):
         room_name_list[3] = str(room_name_list[3])
         return "".join(room_name_list)
 
+    def nav_menu(self, op):
+        if op == "enter":
+            self.menu_depth += 1
+            if self.menu_depth < len(self.menu_path):
+                self.menu_path[self.menu_depth] = self.menu_selected
+            else:
+                self.menu_path.append(self.menu_selected)
+            self.current_menu = self.operate_menu
+            for i in range(1, self.menu_depth + 1):
+                self.current_menu = self.current_menu["sub_menu"][self.menu_path[i]]
+            if self.current_menu["sub_menu"] is None:
+                path = self.get_menu_path_item()
+                log(path)
+                # TODO: Menu -> API
+                if path[0] == "Place spawn":
+                    self.__api.place_spawn(self.room_name, self.room_x, self.room_y, "Spawn1")  # TODO: input
+                if path[0] == "Create Construction Site":
+                    pass
+                self.menu_depth = -1
+                self.current_menu = None
+            else:
+                if self.menu_depth + 1 < len(self.menu_path):
+                    self.menu_selected = self.menu_path[self.menu_depth + 1]
+                    if self.menu_selected >= len(self.current_menu["sub_menu"]):
+                        self.menu_selected = 0
+                else:
+                    self.menu_selected = 0
+        elif op == "back":
+            if self.menu_depth > -1:
+                self.menu_depth -= 1
+            if self.menu_depth == -1:
+                self.current_menu = None
+            else:
+                self.current_menu = self.operate_menu
+                for i in range(1, self.menu_depth + 1):
+                    self.current_menu = self.current_menu["sub_menu"][self.menu_path[i]]
+                self.menu_selected = self.menu_path[self.menu_depth + 1]
+        elif op == "down":
+            if self.menu_depth != -1:
+                self.menu_selected = (self.menu_selected + 1) % len(self.current_menu["sub_menu"])
+        elif op == "up":
+            if self.menu_depth != -1:
+                self.menu_selected = (self.menu_selected - 1) % len(self.current_menu["sub_menu"])
+        # for _i, i in enumerate(self.current_menu["sub_menu"]):
+        #     if _i == self.menu_selected:
+        #         log("menu", i["item"], "selected")
+        #     else:
+        #         log("menu", i["item"])
+
+    def get_menu_path_item(self):
+        res = list()
+        if self.menu_depth > 0:
+            current_menu = self.operate_menu
+            for i in range(1, self.menu_depth + 1):
+                current_menu = current_menu["sub_menu"][self.menu_path[i]]
+                res.append(current_menu["item"])
+        return res
+
 
 class ConsoleView(object):
 
     def __init__(self):
         self.line_length = 80
 
-        self.__socket = screeps_api.Socket()
-        self.__api = screeps_api.Api()
+        self.__socket = screeps_api.Socket(config.SERVER_HOST, config.SERVER_PORT, config.USERNAME, config.PASSWORD)
+        self.__api = screeps_api.Api(config.SERVER_HOST, config.SERVER_PORT, config.USERNAME, config.PASSWORD)
 
         self.__log_list = list()
         self.__log_max_length = 2000
@@ -272,7 +428,7 @@ class Render(object):
         self.__cursor_x = 0
         self.__cursor_y = 0
 
-        self.__panel = "console"
+        self.__panel = "console"  # default panel
 
         # Map Panel
         self.__map_view = MapView()
@@ -283,9 +439,12 @@ class Render(object):
         self.__room_view_top, self.__room_view_bottom = 0, self.__room_display_height
         self.__room_object_info = list()
         self.__room_object_selected = 0
-        self.__cursor_x = self.__room_display_left + self.__room_display_width // 2
-        self.__cursor_y = self.__room_display_top + self.__room_display_height // 2
+        self.__cursor_x = self.__room_display_left + self.__room_display_width // 2 - 1
+        self.__cursor_y = self.__room_display_top + self.__room_display_height // 2 - 1
         self.__shift_step = 5
+
+        self.__map_view.room_x = self.__cursor_x - self.__room_display_left + self.__room_view_left
+        self.__map_view.room_y = self.__cursor_y - self.__room_display_top + self.__room_view_top
 
         # Console Panel
         self.__console_view = ConsoleView()
@@ -337,19 +496,19 @@ class Render(object):
             self.__screen_height, self.__screen_width = screen.getmaxyx()
 
             if self.__panel == "map":
-                screen.addstr(0, 0, "{: <16}".format("[1]Map"), curses.color_pair(1))
+                screen.addstr(0, 0, "{: <16}".format("[F1]Map"), curses.color_pair(1))
             else:
-                screen.addstr(0, 0, "{: <16}".format("[1]Map"), curses.color_pair(2))
+                screen.addstr(0, 0, "{: <16}".format("[F1]Map"), curses.color_pair(2))
 
             if self.__panel == "console":
-                screen.addstr(0, 16, "{: <16}".format("[2]Console"), curses.color_pair(1))
+                screen.addstr(0, 16, "{: <16}".format("[F2]Console"), curses.color_pair(1))
             else:
-                screen.addstr(0, 16, "{: <16}".format("[2]Console"), curses.color_pair(2))
+                screen.addstr(0, 16, "{: <16}".format("[F2]Console"), curses.color_pair(2))
 
             if self.__panel == "memory":
-                screen.addstr(0, 32, "{: <16}".format("[3]Memory"), curses.color_pair(1))
+                screen.addstr(0, 32, "{: <16}".format("[F3]Memory"), curses.color_pair(1))
             else:
-                screen.addstr(0, 32, "{: <16}".format("[3]Memory"), curses.color_pair(2))
+                screen.addstr(0, 32, "{: <16}".format("[F3]Memory"), curses.color_pair(2))
 
             screen.addstr(0, 16 * 3, " " * (self.__screen_width - 16 * 4), curses.color_pair(2))
             screen.addstr(0, self.__screen_width - 16, "{: <16}".format("[ESC]Exit"), curses.color_pair(2))
@@ -370,20 +529,42 @@ class Render(object):
                                   line, curses.color_pair(0))
 
                 # render object list
+                room_x = self.__cursor_x - self.__room_display_left + self.__room_view_left
+                room_y = self.__cursor_y - self.__room_display_top + self.__room_view_top
+                screen.addstr(self.__room_display_top + self.__room_display_height + 2,
+                              self.__room_display_left + 26 + 3,
+                              "Position x:{} y:{}".format(room_x, room_y),
+                              curses.color_pair(0))
                 for y, obj in enumerate(self.__room_object_info):
-                    screen.addstr(self.__room_display_top + self.__room_display_height + 2 + y,
+                    screen.addstr(self.__room_display_top + self.__room_display_height + 4 + y,
                                   self.__room_display_left + 26 + 3,
                                   obj["type"],
                                   curses.color_pair(2) if y == self.__room_object_selected else curses.color_pair(0))
 
-                # render info
-                if len(self.__room_object_info) > 0:
-                    # log(json.dumps(self.__room_object_info[0], indent=4, sort_keys=True))
-                    info_list = json.dumps(self.__room_object_info[self.__room_object_selected],
-                                           indent=4, sort_keys=True).splitlines()
-                    for y, line in enumerate(info_list[: self.__screen_height - 5]):
-                        screen.addstr(4 + y, 55,
-                                      line[:self.__screen_width - 55], curses.color_pair(0))
+                if self.__map_view.menu_depth > -1:
+                    # render menu
+                    screen.addstr(2, 55, "Operation Menu", curses.color_pair(0))
+                    menu_path = self.__map_view.get_menu_path_item()
+                    for indent, line in enumerate(self.__map_view.get_menu_path_item()):
+                        screen.addstr(4 + indent, 55 + 4 * indent,
+                                      line, curses.color_pair(0))
+                    for y, line in enumerate(self.__map_view.current_menu["sub_menu"]):
+                        screen.addstr(4 + len(menu_path) + y, 55 + 4 * len(menu_path),
+                                      line["item"][:self.__screen_width - 55 - 4 * len(menu_path)],
+                                      curses.color_pair(2)
+                                      if y == self.__map_view.menu_selected else curses.color_pair(0))
+                else:
+                    # render info
+                    if len(self.__room_object_info) > 0:
+                        # log(json.dumps(self.__room_object_info[0], indent=4, sort_keys=True))
+                        screen.addstr(2, 55,
+                                      "{} {}".format(self.__map_view.room_x, self.__map_view.room_y),
+                                      curses.color_pair(0))
+                        info_list = json.dumps(self.__room_object_info[self.__room_object_selected],
+                                               indent=4, sort_keys=True).splitlines()
+                        for y, line in enumerate(info_list[: self.__screen_height - 5]):
+                            screen.addstr(4 + y, 55,
+                                          line[:self.__screen_width - 55], curses.color_pair(0))
 
                 screen.move(self.__cursor_y, self.__cursor_x)
 
@@ -433,13 +614,13 @@ class Render(object):
         # clear_output()
         log(event.name)
 
-        if event.name == "1" and keyboard.is_pressed("ctrl"):
+        if event.name == "f1":
             self.__panel = "map"
             return
-        if event.name == "2" and keyboard.is_pressed("ctrl"):
+        if event.name == "f2":
             self.__panel = "console"
             return
-        if event.name == "3" and keyboard.is_pressed("ctrl"):
+        if event.name == "f3":
             self.__panel = "memory"
             return
         if event.name == "esc":
@@ -447,13 +628,15 @@ class Render(object):
             return
 
         if self.__panel == "map":
-            if event.name == "p":
+            if event.name == "p" and keyboard.is_pressed("ctrl"):
                 self.__pause = not self.__pause
+                return
 
-            if event.name == "r":
+            if event.name == "r" and keyboard.is_pressed("ctrl"):
                 self.__map_view.stop()
                 self.__map_view = MapView()
                 self.__map_view.watch()
+                return
 
             if event.name.lower() in "hjklyubn" \
                     and self.__cursor_x in range(self.__room_display_left,
@@ -624,16 +807,26 @@ class Render(object):
                                                   self.__cursor_y + 1)
                         self.__cursor_x = min(self.__room_display_left + self.__room_display_width - 1,
                                               self.__cursor_x + 1)
+                # update position after moving the cursor
+                self.__map_view.room_x = self.__cursor_x - self.__room_display_left + self.__room_view_left
+                self.__map_view.room_y = self.__cursor_y - self.__room_display_top + self.__room_view_top
 
-                self.__room_object_info = self.__map_view.get_info(
-                    self.__cursor_x - self.__room_display_left + self.__room_view_left,
-                    self.__cursor_y - self.__room_display_top + self.__room_view_top)
-                self.__room_object_selected = self.__room_object_selected \
-                    if self.__room_object_selected < len(self.__room_object_info) else 0
+            self.__room_object_info = self.__map_view.get_info()
+            self.__room_object_selected = self.__room_object_selected \
+                if self.__room_object_selected < len(self.__room_object_info) else 0
 
             if event.name == "tab":
                 if len(self.__room_object_info) > 0:
                     self.__room_object_selected = (self.__room_object_selected + 1) % len(self.__room_object_info)
+
+            if event.name == "enter" or event.name == "right":
+                self.__map_view.nav_menu("enter")
+            if event.name == "backspace" or event.name == "left":
+                self.__map_view.nav_menu("back")
+            if event.name == "down":
+                self.__map_view.nav_menu("down")
+            if event.name == "up":
+                self.__map_view.nav_menu("up")
             # else:
             #     if event.name == "left":
             #         self.__cursor_x = max(0, self.__cursor_x - 1)
@@ -643,6 +836,7 @@ class Render(object):
             #         self.__cursor_y = max(0, self.__cursor_y - 1)
             #     if event.name == "down":
             #         self.__cursor_y = min(self.__screen_height - 1, self.__cursor_y + 1)
+            return
         elif self.__panel == "console":
             log_max_display_height = (self.__screen_height - 2) // 2
             log_len = len(self.__console_view.get_log())
@@ -655,25 +849,30 @@ class Render(object):
                     self.__log_index = min(log_len - log_max_display_height, self.__log_index + log_max_display_height)
                     if self.__log_index >= log_len - log_max_display_height:
                         self.__log_index = -1
+            if event.name == "r" and keyboard.is_pressed("ctrl"):
+                self.__console_view.stop()
+                self.__console_view = ConsoleView()
+                self.__console_view.watch()
+                return
             cmd_max_display_length = self.__screen_width - 2 - 1
             if event.name.lower() in "abcdefghijklmnopqrstuvwxyz0123456789-_=+!@#$%^&*()[]{}<>,.;:'\"\\/|?":
-                self.__cmd = self.__cmd[0: self.__cmd_left + self.__cursor_pos] + event.name \
-                             + self.__cmd[self.__cmd_left + self.__cursor_pos:]
+                self.__cmd = self.__cmd[0: self.__cmd_left + self.__cursor_pos] + event.name + \
+                             self.__cmd[self.__cmd_left + self.__cursor_pos:]
                 if len(self.__cmd) - self.__cmd_left > cmd_max_display_length:
                     self.__cmd_left += 1
                 else:
                     self.__cursor_pos += 1
             if event.name.lower() == "insert" and keyboard.is_pressed("shift"):
                 text = pyperclip.paste().replace("\n", "").replace("\r", "")
-                self.__cmd = self.__cmd[0: self.__cmd_left + self.__cursor_pos] + text \
-                             + self.__cmd[self.__cmd_left + self.__cursor_pos:]
+                self.__cmd = self.__cmd[0: self.__cmd_left + self.__cursor_pos] + text + \
+                             self.__cmd[self.__cmd_left + self.__cursor_pos:]
                 if len(self.__cmd) - self.__cmd_left > cmd_max_display_length:
                     self.__cmd_left += len(text)
                 else:
                     self.__cursor_pos += len(text)
             if event.name == "space":
-                self.__cmd = self.__cmd[0: self.__cmd_left + self.__cursor_pos] + " " \
-                             + self.__cmd[self.__cmd_left + self.__cursor_pos:]
+                self.__cmd = self.__cmd[0: self.__cmd_left + self.__cursor_pos] + " " + \
+                             self.__cmd[self.__cmd_left + self.__cursor_pos:]
                 self.__cursor_pos += 1
             if event.name == "backspace":
                 if self.__cursor_pos > 0:

@@ -1,8 +1,6 @@
 
 # —*- coding: utf-8 -*-
 
-from config import *
-
 import requests
 import ssl
 import threading
@@ -12,9 +10,9 @@ import websocket
 def singleton(cls):
     _instance = dict()
 
-    def inner():
+    def inner(*args):
         if cls not in _instance:
-            _instance[cls] = cls()
+            _instance[cls] = cls(*args)
         return _instance[cls]
 
     return inner
@@ -23,45 +21,84 @@ def singleton(cls):
 @singleton
 class Authentication(object):
 
-    def __init__(self):
+    def __init__(self, server_host, server_port, username, password):
+        self.__url = "{}:{}".format(server_host, server_port)
+        self.__username, self.__password = username, password
         self.__token = ""
-        self.__url = "{}:{}".format(SERVER_HOST, SERVER_PORT)
-        self.__username, self.__password = USERNAME, PASSWORD
+        self.auth_succeed, self.auth_msg = False, ""
 
-    def __get_token(self):
-        return requests.post("http://{}/api/auth/signin".format(self.__url),
-                             json={
-                                 "email": self.__username,
-                                 "password": self.__password
-                             }).json()["token"]
+    def __sign_in(self):
+        print("[api sign_in]")
+        try:
+            self.__token = ""
+            res = requests.post(
+                # api from screepsmod-auth
+                # https://github.com/ScreepsMods/screepsmod-auth/blob/master/lib/backend.js
+                "http://{}/api/auth/signin".format(self.__url),
+                json={
+                    "email": self.__username,
+                    "password": self.__password
+                }
+            )
+            if res.status_code == 200:
+                self.__token = res.json()["token"]
+                return True, "Authentication Succeed"
+            else:
+                if res.status_code == 404:
+                    print("[api]User/Pass Auth Not Allowed")
+                    return False, "User/Pass Auth Not Allowed"
+                elif res.status_code == 401:
+                    print("[api]Authentication Failed")
+                    return False, "Authentication Failed"
+                else:
+                    print("[api]{}".format(res.status_code))
+                    return False, "[api]{}".format(res.status_code)
+        except requests.exceptions.ConnectionError:
+            print("[api]Connection Failed")
+            return False, "Connection Failed"
 
     def __get_me(self):
-        return requests.get("http://{}/api/auth/me".format(self.__url),
-                            headers={
-                                "X-Token": self.__token,
-                                "X-Username": self.__token
-                            }).json()
+        try:
+            res = requests.get(
+                "http://{}/api/auth/me".format(self.__url),
+                headers={
+                    "X-Token": self.__token,
+                    "X-Username": self.__token
+                }
+            )
+            if res.status_code == 200:
+                return res.json()
+            else:
+                if res.status_code == 401:
+                    self.auth_succeed = False
+                else:
+                    print("[api]{}".format(res.status_code))
+                return dict()
+        except requests.exceptions.ConnectionError:
+            print("[api]Connection Failed")
+            return dict()
 
     def get_token(self):
-        if "error" in self.__get_me():
-            self.__token = self.__get_token()
+        if "error" in self.__get_me() or not self.auth_succeed:
+            self.auth_succeed, self.auth_msg = self.__sign_in()
         return self.__token
 
     def get_me(self):
-        self.__token = self.get_token()
+        if "error" in self.__get_me():
+            self.auth_succeed, self.auth_msg = self.__sign_in()
         return self.__get_me()
 
 
 class Socket(threading.Thread):
 
-    def __init__(self):
+    def __init__(self, server_host, server_port, username, password):
         threading.Thread.__init__(self)
 
         self.__debug_socket = False
 
         self.__ws = None
-        self.__url = "{}:{}".format(SERVER_HOST, SERVER_PORT)
-        self.__auth = Authentication()
+        self.__url = "{}:{}".format(server_host, server_port)
+        self.__auth = Authentication(server_host, server_port, username, password)
         self.__subscribe_target = ""
         self.__interval = 0.05
         self.subscribe("user", "console")
@@ -72,7 +109,9 @@ class Socket(threading.Thread):
 
     def subscribe(self, _type, _name):
         if _type == "user":
-            _name = "{}/{}".format(self.__auth.get_me()["_id"], _name)
+            my_info = self.__auth.get_me()
+            if "_id" in my_info:
+                _name = "{}/{}".format(self.__auth.get_me()["_id"], _name)
         self.__subscribe_target = "{}:{}".format(_type, _name)
 
     def run(self):
@@ -143,55 +182,316 @@ class Socket(threading.Thread):
 
 class Api(object):
 
-    def __init__(self):
-        self.__url = "http://{}:{}".format(SERVER_HOST, SERVER_PORT)
-        self.__auth = Authentication()
+    def __init__(self, server_host, server_port, username, password):
+        self.__url = "http://{}:{}".format(server_host, server_port)
+        self.__auth = Authentication(server_host, server_port, username, password)
 
-    def get(self, url, params=None):
-        return requests.get("{}{}".format(self.__url, url),
-                            headers={
-                                "X-Token": self.__auth.get_token(),
-                                "X-Username": self.__auth.get_token()
-                            },
-                            params=params)
+    def get(self, url, params=None, without_auth=False):
+        headers = dict()
+        if not without_auth:
+            token = self.__auth.get_token()
+            headers = {
+                "X-Token": token,
+                "X-Username": token,
+            }
+        try:
+            res = requests.get(
+                "{}{}".format(self.__url, url),
+                headers=headers,
+                params=params)
+            if res.status_code == 200:
+                return res.json()
+            else:
+                if res.status_code == 401:
+                    print("[api]Not Allowed")
+                else:
+                    print("[api]{}".format(res.status_code))
+                return dict()
+        except requests.exceptions.ConnectionError:
+            print("[api]Connection Failed")
+            return dict()
 
-    def post(self, url, json=None):
-        return requests.post("{}{}".format(self.__url, url),
-                             headers={
-                                 "X-Token": self.__auth.get_token(),
-                                 "X-Username": self.__auth.get_token()
-                             },
-                             json=json)
+    def post(self, url, body=None, without_auth=False):
+        headers = dict()
+        if not without_auth:
+            token = self.__auth.get_token()
+            headers = {
+                "X-Token": token,
+                "X-Username": token,
+            }
+        try:
+            res = requests.post(
+                "{}{}".format(self.__url, url),
+                headers=headers,
+                json=body)
+            if res.status_code == 200:
+                return res.json()
+            else:
+                if res.status_code == 401:
+                    print("[api]Not Allowed")
+                else:
+                    print("[api]{}".format(res.status_code))
+                return dict()
+        except requests.exceptions.ConnectionError:
+            print("[api]Connection Failed")
+            return dict()
 
-    def get_user_code(self):
-        return self.get("/api/user/code").json()
+    # /api/auth
+    def get_me(self):
+        return self.get(
+            "/api/auth/me",
+        )
 
-    def post_user_code(self, dict_data):
-        return self.post("/api/user/code",
-                         json=dict_data).json()
-
-    def post_user_console(self, expression):
-        return self.post("/api/user/console",
-                         json={
-                             "expression": expression
-                         }).json()
-
-    def get_user_memory(self):
-        return self.get("/api/user/memory").json()
-
-    def get_user_overview(self):
-        return self.get("/api/user/overview").json()
-
-    def get_time(self):
-        return self.get("/api/game/time").json()
+    # /api/game
+    def get_room_status(self, room):
+        return self.get(
+            "/api/game/room-status",
+            params={
+                "room": room,
+            }
+        )
 
     def get_room_terrain(self, room):
-        return self.get("/api/game/room-terrain",
-                        params={
-                            "room": room,
-                        }).json()
+        return self.get(
+            "/api/game/room-terrain",
+            params={
+                "room": room,
+            },
+            without_auth=True,
+        )
+
+    def get_rooms_terrain(self, room_list):
+        return self.post(
+            "/api/game/rooms",
+            body={
+                "rooms": room_list,
+            },
+            without_auth=True,
+        )
+        # 0 == plain, 1 == wall, 2 == 3 == swamp
+
+    def get_tick(self):  # no used
+        return self.get(
+            "/api/game/tick",
+            without_auth=True,
+        )
+
+    def get_time(self):
+        return self.get(
+            "/api/game/time",
+            without_auth=True,
+        )
+
+    def get_world_size(self):
+        return self.get(
+            "/api/game/world-size",
+            without_auth=True,
+        )
+
+    def map_stat(self, room_list, stat_name, interval=0):  # TODO: untested
+        if stat_name in ["owner", "claim"]:
+            stat_name += str(0)
+        elif stat_name in ["creepsLost", "creepsProduced", "energyConstruction",
+                           "energyControl", "energyCreeps", "energyHarvested"]:
+            if interval in [8, 180, 1440]:
+                stat_name += str(interval)
+            else:
+                stat_name += str(0)
+        return self.post(
+            "/api/game/map-stats",
+            body={
+                "rooms": room_list,
+                "statName": stat_name,
+            }
+        )
+
+    def room_overview(self, room):  # TODO: untested
+        return self.get(
+            "/api/game/room-overview",
+            params={
+                "room": room,
+            }
+        )
+        # https://screeps.com/api/game/room-overview?interval=8&room=E1N8
+        #
+        # { ok, owner: { username, badge: { type, color1, color2, color3, param, flip } }, stats: { energyHarvested:
+        # [ { value, endTime } ], energyConstruction: [ { value, endTime } ], energyCreeps: [ { value, endTime } ],
+        # energyControl: [ { value, endTime } ],
+        # creepsProduced: [ { value, endTime } ],
+        # creepsLost: [ { value, endTime } ] },
+        # statsMax: { energy1440, energyCreeps1440, energy8, energyControl8, creepsLost180, energyHarvested8, energy180,
+        # energyConstruction180, creepsProduced8, energyControl1440, energyCreeps8, energyHarvested1440, creepsLost1440,
+        # energyConstruction1440, energyHarvested180, creepsProduced180, creepsProduced1440, energyCreeps180,
+        # energyControl180, energyConstruction8, creepsLost8 } }
+
+    def place_construction_site(self, room, x, y):  # TODO: untested
+        return self.post(
+            "/api/game/create-construction",
+            body={
+                "room": room,
+                "x": x,
+                "y": y,
+            }
+        )
+
+    def place_spawn(self, room, x, y, name):  # TODO: untested
+        return self.post(
+            "/api/game/place-spawn",
+            body={
+                "room": room,
+                "x": x,
+                "y": y,
+                "name": name,
+            }
+        )
+
+# [POST] https://screeps.com/api/game/add-object-intent
+#
+# post data: { _id, room, name, intent }
+# response: { ok, result: { nModified, ok, upserted: [ { index, _id } ], n }, connection: { host, id, port } }
+# _id is the game id of the object to affect (except for destroying structures),
+# room is the name of the room it's in
+# this method is used for a variety of actions, depending on the name and intent parameters
+#       remove flag: name = "remove", intent = {}
+#       destroy structure: _id = "room",
+#                           name = "destroyStructure",
+#                           intent = [ {id: <structure id>, roomName, <room name>, user: <user id>} ]
+#               can destroy multiple structures at once
+#       suicide creep: name = "suicide", intent = {id: <creep id>}
+#       unclaim controller: name = "unclaim", intent = {id: <controller id>}
+#               intent can be an empty object for suicide and unclaim,
+#               but the web interface sends the id in it, as described
+#       remove construction site: name = "remove", intent = {}
+
+    # /api/register
+    def check_email(self, email):
+        return self.get(
+            "/api/register/check-email",
+            params={
+                "email": email
+            },
+            without_auth=True,
+        )
+
+    def check_username(self, username):
+        return self.get(
+            "/api/register/check-username",
+            params={
+                "username": username
+            },
+            without_auth=True,
+        )
+
+    def set_password(self, password):
+        res = self.post(
+            # api from screepsmod-auth
+            # https://github.com/ScreepsMods/screepsmod-auth/blob/master/lib/register.js
+            "/api/user/password",
+            body={
+                "oldPassword": config.PASSWORD,
+                "password": password,
+            }
+        )
+        if "ok" in res and res["ok"] == 1:
+            config.PASSWORD = password
+        return res
+
+    def set_username(self, username, password, email=None):
+        body = {
+            "username": username,
+            "password": password,
+        }
+        if email is not None:
+            body["email"] = email
+        return self.post(
+            # api from screepsmod-auth
+            # https://github.com/ScreepsMods/screepsmod-auth/blob/master/lib/register.js
+            "/api/register/submit",
+            body=body,
+            without_auth=True,
+        )
+
+    # /api/user
+    def clone_branch(self, old_branch, new_branch):
+        return self.post(
+            "/api/user/clone-branch",
+            body={
+                "branch": old_branch,
+                "newName": new_branch,
+            }
+        )
+
+    def delete_branch(self, branch):
+        return self.post(
+            "/api/user/delete-branch",
+            body={
+                "branch": branch
+            }
+        )
+
+    def get_start_room(self):
+        return self.get(
+            "/api/user/world-start-room",
+        )
+
+    def get_all_code(self):
+        return self.get(
+            "/api/user/branches",
+        )
+
+    def get_code(self, branch=None):
+        params = dict()
+        if branch is not None:
+            params["branch"] = branch
+        return self.get(
+            "/api/user/code",
+            params=params,
+        )
+
+    def get_user_memory(self):  # TODO: untested
+        return self.get(
+            "/api/user/memory",
+        )
+
+    def get_user_stat(self):  # TODO: untested
+        return self.get(
+            "/api/user/stats",
+            without_auth=True,
+        )
+
+    def get_user_overview(self):
+        return self.get(
+            "/api/user/overview",
+        )
+
+    def post_code(self, modules, branch):
+        return self.post(
+            "/api/user/code",
+            body={
+                "modules": modules,
+                "branch": branch,
+            }
+        )
+
+    def post_user_console(self, expression):
+        return self.post(
+            "/api/user/console",
+            body={
+                "expression": expression
+            }
+        )
+
+    def set_active_branch(self, branch):
+        return self.post(
+            "/api/user/set-active-branch",
+            body={
+                "activeName": "activeWorld",
+                "branch": branch,
+            }
+        )
 
 
 if __name__ == "__main__":
-    api = Api()
-    print api.get_time()
+    import config
+    api = Api(config.SERVER_HOST, config.SERVER_PORT, config.USERNAME, config.PASSWORD)
+    print(api.get_time())

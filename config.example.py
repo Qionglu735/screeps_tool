@@ -19,20 +19,31 @@ CHAR_MAP = {
     "plain": ".",
     "wall": "#",
     "swamp": ":",
+
     "source": "$",
     "mineral": "&",
+
     "creep": "@",
     "tombstone": "M",
+    "energy": "e",
+
     "controller": "C",
-    "spawn": "W",
-    "tower": "T",
+    "road": "o",
     "container": "N",
     "extension": "X",
+    "rampart": "P",
+    "tower": "T",
     "storage": "R",
+    "link": "I",
+    "extractor": "E",
+    "lab": "L",
+    "terminal": "Z",
+    "spawn": "W",
+    "observer": "O",
+    "powerSpawn": "P",
+
     "constructionSite": "S",
     "ruin": "U",
-    "road": "o",
-    "energy": "e",
 }
 
 CHAR_BODY_PART = {

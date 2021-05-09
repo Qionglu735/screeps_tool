@@ -3,6 +3,7 @@
 
 import json
 
+import config
 import screeps_api
 
 
@@ -18,7 +19,7 @@ def console_callback(message):
 
 
 def main():
-    sc = screeps_api.Socket()
+    sc = screeps_api.Socket(config.SERVER_HOST, config.SERVER_PORT, config.USERNAME, config.PASSWORD)
     sc.subscribe("user", "console")
     sc.callback = console_callback
     # sc.set_debug(True)
