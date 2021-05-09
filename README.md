@@ -1,5 +1,5 @@
 
-# Screeps Client For Private Server
+# Python Screeps Client For Private Server
 
 ---
 
