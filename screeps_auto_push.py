@@ -13,22 +13,24 @@ import config
 import screeps_api
 
 
+CONFIRM_BEFORE_PUSH = False
 DAEMON_MODE = False
 LOG_FILE = None
 
 
 class Color(object):
-    RED = "\033[91m"
-    GREEN = "\033[92m"
-    YELLOW = "\033[93m"
-    BLUE = "\033[94m"
-    PURPLE = "\033[95m"
-    CYAN = "\033[96m"
-    NORMAL = "\033[0m"
-    BOLD = "\033[1m"
-    ITALIC = "\033[3m"
-    UNDERLINE = "\033[4m"
-    REVERSE = "\033[7m"
+    def __init__(self):
+        self.RED = "\033[91m" if LOG_FILE is None else ""
+        self.GREEN = "\033[92m" if LOG_FILE is None else ""
+        self.YELLOW = "\033[93m" if LOG_FILE is None else ""
+        self.BLUE = "\033[94m" if LOG_FILE is None else ""
+        self.PURPLE = "\033[95m" if LOG_FILE is None else ""
+        self.CYAN = "\033[96m" if LOG_FILE is None else ""
+        self.NORMAL = "\033[0m" if LOG_FILE is None else ""
+        self.BOLD = "\033[1m" if LOG_FILE is None else ""
+        self.ITALIC = "\033[3m" if LOG_FILE is None else ""
+        self.UNDERLINE = "\033[4m" if LOG_FILE is None else ""
+        self.REVERSE = "\033[7m" if LOG_FILE is None else ""
 
 
 def push():
@@ -63,14 +65,14 @@ def push():
         print("Everything updated.", file=LOG_FILE)
         return True
     else:
-        if DAEMON_MODE:
-            confirm = "yes"
-        else:
+        if CONFIRM_BEFORE_PUSH:
             if sys.version_info[0] > 2:
                 confirm = input("Push to \"{}\"? [yes/no]".format(config.BRANCH_NAME))
             else:
                 confirm = raw_input("Push to \"{}\"? [yes/no]".format(config.BRANCH_NAME))
-        if confirm.lower() == "yes":
+        else:
+            confirm = "yes"
+        if confirm.lower() == "yes" or confirm.lower() == "y":
             print("Pushing...", file=LOG_FILE)
             # res = requests.post("http://{}:{}/api/user/code".format(SERVER_HOST, SERVER_PORT),
             #                     headers={
@@ -110,6 +112,7 @@ def read_file(path):
 
 
 def diff_module(key, server_module, local_module):
+    color = Color()
     if server_module == local_module:
         pass
     elif type(server_module) == unicode and type(local_module) == unicode:
@@ -128,8 +131,8 @@ def diff_module(key, server_module, local_module):
                     line_num += 1
                 if i[0] != " ":
                     if 0 <= last_printed_index < _index - 7:
-                        print("   {} |   {}".format(Color.CYAN + "..." + Color.NORMAL,
-                                                    Color.CYAN + "... ..." + Color.NORMAL), file=LOG_FILE)
+                        print("   {} |   {}".format(color.CYAN + "..." + color.NORMAL,
+                                                    color.CYAN + "... ..." + color.NORMAL), file=LOG_FILE)
                     while len(lines_before) > 0:
                         if i[0] == "-":
                             line_num += 1
@@ -139,11 +142,11 @@ def diff_module(key, server_module, local_module):
                         lines_before.pop(0)
                     if i[0] in ["+"]:
                         print("{:>6} | {}".format(line_num,
-                                                  Color.GREEN + i.replace("\n", "") + Color.NORMAL), file=LOG_FILE)
+                                                  color.GREEN + i.replace("\n", "") + color.NORMAL), file=LOG_FILE)
                     elif i[0] in ["-"]:
-                        print("       | {}".format(Color.RED + i.replace("\n", "") + Color.NORMAL), file=LOG_FILE)
+                        print("       | {}".format(color.RED + i.replace("\n", "") + color.NORMAL), file=LOG_FILE)
                     elif i[0] in ["?"]:
-                        print("       | {}".format(Color.YELLOW + i.replace("\n", "") + Color.NORMAL), file=LOG_FILE)
+                        print("       | {}".format(color.YELLOW + i.replace("\n", "") + color.NORMAL), file=LOG_FILE)
                     else:
                         print("       | {}".format(i.replace("\n", "")), file=LOG_FILE)
                     last_printed_index = _index
@@ -176,7 +179,6 @@ def diff_module(key, server_module, local_module):
 def main(log_file=None):
     global DAEMON_MODE
     global LOG_FILE
-    # TODO: stop print color if using log file
 
     now = datetime.datetime.now()
     if log_file is not None:
@@ -218,4 +220,4 @@ if __name__ == "__main__":
     for arg in sys.argv:
         if arg in ["-d", "--daemon"]:
             DAEMON_MODE = True
-    main("log")
+    main()

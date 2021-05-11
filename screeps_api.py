@@ -28,7 +28,7 @@ class Authentication(object):
         self.auth_succeed, self.auth_msg = False, ""
 
     def __sign_in(self):
-        print("[api sign_in]")
+        print("[api]Sign In")
         try:
             self.__token = ""
             res = requests.post(
@@ -42,6 +42,7 @@ class Authentication(object):
             )
             if res.status_code == 200:
                 self.__token = res.json()["token"]
+                print("[api]Succeed")
                 return True, "Authentication Succeed"
             else:
                 if res.status_code == 404:
@@ -71,9 +72,10 @@ class Authentication(object):
             else:
                 if res.status_code == 401:
                     self.auth_succeed = False
+                    return res.json()
                 else:
                     print("[api]{}".format(res.status_code))
-                return dict()
+                    return dict()
         except requests.exceptions.ConnectionError:
             print("[api]Connection Failed")
             return dict()
@@ -238,9 +240,10 @@ class Api(object):
 
     # /api/auth
     def get_me(self):
-        return self.get(
-            "/api/auth/me",
-        )
+        # return self.get(
+        #     "/api/auth/me",
+        # )
+        return self.__auth.get_me()
 
     # /api/game
     def get_room_status(self, room):
@@ -268,7 +271,7 @@ class Api(object):
             },
             without_auth=True,
         )
-        # 0 == plain, 1 == wall, 2 == 3 == swamp
+        # 0 == plain, 1 == wall, 2 == swamp, 3 == wall & swamp
 
     def get_tick(self):  # no used
         return self.get(
@@ -288,7 +291,18 @@ class Api(object):
             without_auth=True,
         )
 
-    def map_stat(self, room_list, stat_name, interval=0):  # TODO: untested
+    def map_stat(self, room_list, stat_name="owner", interval=0):
+        """
+        /api/game/map-stats.
+        get room info and user info of given room list.
+        :param room_list: room name list.
+        :param stat_name: owner, claim,
+        creepsLost, creepsProduced, energyConstruction, energyControl, energyCreeps, energyHarvested.
+        :param interval: 8, 180, 1440.
+        :return: room info and user info
+        (lastUsedCpu, lastUsedDirtyTime: unknown, cpuAvailable: bucket, cpu: max cpu, gcl),
+        stats parameter is not effective, probable abandoned.
+        """
         if stat_name in ["owner", "claim"]:
             stat_name += str(0)
         elif stat_name in ["creepsLost", "creepsProduced", "energyConstruction",
@@ -305,11 +319,17 @@ class Api(object):
             }
         )
 
-    def room_overview(self, room):  # TODO: untested
+    def room_overview(self, room):
+        """
+        /api/game/room-overview.
+        :param room: room name.
+        :return: nothing, probable abandoned.
+        """
         return self.get(
             "/api/game/room-overview",
             params={
                 "room": room,
+                "interval": 8,
             }
         )
         # https://screeps.com/api/game/room-overview?interval=8&room=E1N8
@@ -324,17 +344,18 @@ class Api(object):
         # energyConstruction1440, energyHarvested180, creepsProduced180, creepsProduced1440, energyCreeps180,
         # energyControl180, energyConstruction8, creepsLost8 } }
 
-    def place_construction_site(self, room, x, y):  # TODO: untested
+    def place_construction_site(self, room, x, y, structure_type):
         return self.post(
             "/api/game/create-construction",
             body={
                 "room": room,
                 "x": x,
                 "y": y,
+                "structureType": structure_type,
             }
         )
 
-    def place_spawn(self, room, x, y, name):  # TODO: untested
+    def place_spawn(self, room, x, y, name):
         return self.post(
             "/api/game/place-spawn",
             body={
@@ -345,23 +366,96 @@ class Api(object):
             }
         )
 
-# [POST] https://screeps.com/api/game/add-object-intent
-#
-# post data: { _id, room, name, intent }
-# response: { ok, result: { nModified, ok, upserted: [ { index, _id } ], n }, connection: { host, id, port } }
-# _id is the game id of the object to affect (except for destroying structures),
-# room is the name of the room it's in
-# this method is used for a variety of actions, depending on the name and intent parameters
-#       remove flag: name = "remove", intent = {}
-#       destroy structure: _id = "room",
-#                           name = "destroyStructure",
-#                           intent = [ {id: <structure id>, roomName, <room name>, user: <user id>} ]
-#               can destroy multiple structures at once
-#       suicide creep: name = "suicide", intent = {id: <creep id>}
-#       unclaim controller: name = "unclaim", intent = {id: <controller id>}
-#               intent can be an empty object for suicide and unclaim,
-#               but the web interface sends the id in it, as described
-#       remove construction site: name = "remove", intent = {}
+    def remove_construction_site(self, _id):
+        """
+        remove construction site.
+        /api/game/add-object-intent return ok, but not effective.
+        use /api/user/console instead.
+        :param _id: target _id.
+        :return: result
+        """
+        # return self.post(  # API return ok, but not effective
+        #     "/api/game/add-object-intent",
+        #     body={
+        #         "_id": _id,
+        #         "room": room,
+        #         "name": "remove",
+        #         "intent": {},
+        #     }
+        # )
+        return self.post_user_console("Game.getObjectById('{}').remove()".format(_id))
+
+    def remove_creep(self, _id):
+        """
+        kill a creep.
+        /api/game/add-object-intent return ok, but not effective.
+        use /api/user/console instead.
+        :param _id: target _id.
+        :return: result
+        """
+        return self.post_user_console("Game.getObjectById('{}').suicide()".format(_id))
+
+    def remove_structure(self, _id):
+        """
+        remove structure.
+        /api/game/add-object-intent return ok, but not effective.
+        use /api/user/console instead.
+        :param _id: target _id.
+        :return: result
+        """
+        # return self.post(  # API return ok, but not effective
+        #     "/api/game/add-object-intent",
+        #     body={
+        #         "_id": "room",
+        #         "room": room,
+        #         "name": "destroyStructure",
+        #         "intent": [{
+        #             "id": _id,
+        #             "roomName": room,
+        #             "user": self.get_me()["_id"],
+        #         }]
+        #     }
+        # )
+        return self.post_user_console("Game.getObjectById('{}').destroy()".format(_id))
+
+    def unclaim_controller(self, _id):  # TODO: untested
+        """
+        unclaim controller.
+        /api/game/add-object-intent return ok, but not effective.
+        use /api/user/console instead.
+        :param _id: target _id.
+        :return: result
+        """
+        return self.post_user_console("Game.getObjectById('{}').unclaim()".format(_id))
+
+    # [POST] https://screeps.com/api/game/add-object-intent
+    #
+    # post data: { _id, room, name, intent }
+    # response: { ok, result: { nModified, ok, upserted: [ { index, _id } ], n }, connection: { host, id, port } }
+    # _id is the game id of the object to affect (except for destroying structures),
+    # room is the name of the room it's in this method is used for a variety of actions,
+    # depending on the name and intent parameters
+    #       remove flag: name = "remove", intent = {}
+    #       destroy structure: _id = "room",
+    #                           name = "destroyStructure",
+    #                           intent = [ {id: <structure id>, roomName, <room name>, user: <user id>} ]
+    #               can destroy multiple structures at once
+    #       suicide creep: name = "suicide", intent = {id: <creep id>}
+    #       unclaim controller: name = "unclaim", intent = {id: <controller id>}
+    #               intent can be an empty object for suicide and unclaim,
+    #               but the web interface sends the id in it, as described
+    #       remove construction site: name = "remove", intent = {}
+
+    #     COLOR_RED: 1,
+    #     COLOR_PURPLE: 2,
+    #     COLOR_BLUE: 3,
+    #     COLOR_CYAN: 4,
+    #     COLOR_GREEN: 5,
+    #     COLOR_YELLOW: 6,
+    #     COLOR_ORANGE: 7,
+    #     COLOR_BROWN: 8,
+    #     COLOR_GREY: 9,
+    #     COLOR_WHITE: 10,
 
     # /api/register
     def check_email(self, email):
@@ -429,6 +523,25 @@ class Api(object):
             }
         )
 
+    def find_user(self, username="", _id=None):
+        """
+        /api/user/find, get user info in game.
+        :param username: username.
+        :param _id: user _id.
+        :return: username, _id, gcl.
+        """
+        return self.get(
+            "/api/user/find",
+            params={
+                "username": username,
+            }
+            if _id is None else
+            {
+                "id": _id
+            },
+            without_auth=True,
+        )
+
     def get_start_room(self):
         return self.get(
             "/api/user/world-start-room",
@@ -448,20 +561,49 @@ class Api(object):
             params=params,
         )
 
-    def get_user_memory(self):  # TODO: untested
-        return self.get(
+    def get_user_memory(self, raw=False):
+        memory = self.get(
             "/api/user/memory",
         )
+        if raw:
+            return memory
+        import base64
+        import zlib
+        import json
+        byte_string = base64.b64decode(memory["data"][3:])
+        json_string = zlib.decompress(byte_string, 15 + 32)
+        memory["data"] = json.loads(json_string)
+        return memory
 
-    def get_user_stat(self):  # TODO: untested
+    def get_user_stat(self):
+        """
+        /api/user/stats.
+        :return: nothing, probable abandoned.
+        """
         return self.get(
             "/api/user/stats",
+            params={
+                "interval": 8,
+            },
             without_auth=True,
         )
 
     def get_user_overview(self):
+        """
+        /api/user/overview.
+        :return: room list only, probable abandoned.
+        """
         return self.get(
             "/api/user/overview",
+        )
+
+    def get_world_status(self):
+        """
+        /api/user/world-status.
+        :return: empty, normal, lost.
+        """
+        return self.get(
+            "/api/user/world-status",
         )
 
     def post_code(self, modules, branch):
@@ -481,6 +623,11 @@ class Api(object):
             }
         )
 
+    def respawn(self):  # TODO: untested
+        return self.post(
+            "/api/user/respawn",
+        )
+
     def set_active_branch(self, branch):
         return self.post(
             "/api/user/set-active-branch",
@@ -490,8 +637,28 @@ class Api(object):
             }
         )
 
+    def set_user_memory(self, value, path=None):  # TODO: untested
+        body = {
+            "value": value
+        }
+        if path is not None:
+            body["path"] = path
+        return self.post(
+            "/api/user/memory",
+            body=body,
+        )
+
 
 if __name__ == "__main__":
     import config
     api = Api(config.SERVER_HOST, config.SERVER_PORT, config.USERNAME, config.PASSWORD)
     print(api.get_time())
+    print(api.get_tick())
+
+    # print(api.set_username(config.USERNAME, config.PASSWORD))
+    # import screeps_auto_push
+    # screeps_auto_push.main()
+    # print(api.set_active_branch(config.BRANCH_NAME))
+    # print(api.post_user_console("Memory.LoopControl = -1"))
+
+    print(api.map_stat(["W8N3"]))
