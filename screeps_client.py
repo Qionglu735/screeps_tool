@@ -21,25 +21,37 @@ import screeps_auto_push
 
 class MapView(object):
 
-    def __init__(self):
-        self.__room_matrix = [["." for _ in range(50)] for _ in range(50)]
-        self.room_name = ""
+    def __init__(self, room_name=""):
         self.__api = screeps_api.Api(config.SERVER_HOST, config.SERVER_PORT, config.USERNAME, config.PASSWORD)
-        # user_room_list = api.get_user_overview()["rooms"]
-        # if len(user_room_list) > 0:
-        #     self.room_name = user_room_list[0]
-        start_room_info = self.__api.get_start_room()
-        if "room" in start_room_info:
-            self.room_name = self.__api.get_start_room()["room"][0]
-        self.__room_object = dict()
+
+        self.room_name = room_name
+        if self.room_name == "":
+            start_room_info = self.__api.get_start_room()
+            if "room" in start_room_info:
+                self.room_name = self.__api.get_start_room()["room"][0]
+
         self.__room_socket = None
+        self.__room_matrix = [["." for _ in range(50)] for _ in range(50)]
+        self.__room_object = dict()
+
+        self.rcl = 1
+        self.rcl_progress = 0
+        self.rcl_progress_max = 1
+
         self.__cpu_socket = None
         self.cpu = 0
         self.cpu_max = 100
+
+        self.bucket = 0
+        self.bucket_max = 1
+
         self.memory = 0
         self.memory_max = 2 * 1024 * 1024  # 2M
+
         self.game_time = 0
         self.tick_duration = 0
+
+        self.gcl = 0
 
         self.room_x = 24
         self.room_y = 15
@@ -118,10 +130,10 @@ class MapView(object):
                         },
                     ],
                 },
-                {
-                    "item": "Create Flag",
-                    "sub_menu": self.__confirm_menu_template,
-                },
+                # {
+                #     "item": "Create Flag",
+                #     "sub_menu": self.__confirm_menu_template,
+                # },
                 {
                     "item": "Delete",
                     "sub_menu": self.__confirm_menu_template,
@@ -157,11 +169,32 @@ class MapView(object):
     def __room_callback(self, message):
         data = json.loads(message)[1]["objects"]
         for i, item in data.items():
-            # log("{} {}".format(i, item))
+            # log(i, item["type"], item)
             if i not in self.__room_object:
                 self.__room_object[i] = item
             else:
                 self.__room_object[i].update(item)
+            if self.__room_object[i]["type"] == "controller":
+                log(i, self.__room_object[i]["type"], self.__room_object[i])
+                self.rcl = self.__room_object[i]["level"]
+                if self.rcl == 0:
+                    self.rcl_progress = 0
+                    self.rcl_progress_max = 5000
+                    if "reservation" in self.__room_object[i]:
+                        # _id = self.__api.get_me()["_id"]
+                        if "id" not in self.__room_object[i]["reservation"]:
+                            self.rcl_progress = self.__room_object[i]["reservation"]["endTime"] - self.game_time
+                elif self.rcl in range(1, 8):
+                    self.rcl_progress = self.__room_object[i]["progress"]
+                    self.rcl_progress_max = {
+                        1: 200,
+                        2: 45000,
+                        3: 135000,
+                        4: 405000,
+                        5: 1215000,
+                        6: 3645000,
+                        7: 10935000,
+                    }[self.rcl]
 
         # for i in self.__room_object:
         #     if self.__room_object[i]["room"] == self.__room_name and i not in data:
@@ -174,6 +207,16 @@ class MapView(object):
         self.memory = data["memory"]
         self.game_time = self.__api.get_time()["time"]
         self.tick_duration = self.__api.get_tick()["tick"]
+        rooms = self.__api.get_user_overview()["rooms"]
+        if len(rooms) > 0:
+            info = self.__api.map_stat(rooms)
+            _id = self.__api.get_me()["_id"]
+            self.cpu_max = info["users"][_id]["cpu"]
+            self.bucket = info["users"][_id]["cpuAvailable"]
+            self.bucket_max = info["users"][_id]["active"]
+            self.gcl = info["users"][_id]["gcl"]
+        room_info = self.__api.map_stat([self.room_name])["stats"][self.room_name]
+        self.rcl = room_info["own"]["level"]
 
     def __refresh_data(self):
         self.__room_matrix = [[config.CHAR_MAP["plain"] for _ in range(50)] for _ in range(50)]
@@ -199,18 +242,21 @@ class MapView(object):
                     and item["x"] == self.room_x and item["y"] == self.room_y:
                 # log(json.dumps(item))
                 info = copy.deepcopy(item)
-                if "body" in info:
-                    body = list()
-                    for part in info["body"]:
-                        body.append(config.CHAR_BODY_PART[part["type"]]
-                                    if part["type"] in config.CHAR_BODY_PART else "?")
-                    info["body"] = "".join(body)
-                if "creepBody" in info:
-                    body = list()
-                    for part in info["creepBody"]:
-                        body.append(config.CHAR_BODY_PART[part]
-                                    if part in config.CHAR_BODY_PART else "?")
-                    info["creepBody"] = "".join(body)
+                try:
+                    if "body" in info:
+                        body = list()
+                        for part in info["body"]:
+                            body.append(config.CHAR_BODY_PART[part["type"]]
+                                        if part["type"] in config.CHAR_BODY_PART else "?")
+                        info["body"] = "".join(body)
+                    if "creepBody" in info:
+                        body = list()
+                        for part in info["creepBody"]:
+                            body.append(config.CHAR_BODY_PART[part]
+                                        if part in config.CHAR_BODY_PART else "?")
+                        info["creepBody"] = "".join(body)
+                except KeyError:
+                    log(json.dumps(item))
                 for key in ["meta", "$loki", "actionLog"]:
                     if key in info:
                         del info[key]
@@ -546,8 +592,26 @@ class Render(object):
 
             if self.__panel == "map":
                 # render room info
-                # TODO: rcl (no api found)
-                screen.addstr(2, 2, " Room: {}".format(self.__map_view.room_name), curses.color_pair(0))
+                room_name = "Room: {} ".format(self.__map_view.room_name)
+                screen.addstr(2, 2, room_name, curses.color_pair(0))
+
+                if self.__map_view.rcl > 0 or self.__map_view.rcl_progress > 0:
+                    rcl_bar = [1] * (self.__room_display_width - len(room_name) - len("PAUSE") - 1)
+                    rcl_rate = min(1.0 * self.__map_view.rcl_progress / self.__map_view.rcl_progress_max, 1)
+                    for i in range(int(rcl_rate * len(rcl_bar))):
+                        rcl_bar[i] = 6
+                    if self.__map_view.rcl > 0:
+                        rcl_info = "RCL:{} {:>8}/{:>8}".format(self.__map_view.rcl,
+                                                               self.__map_view.rcl_progress,
+                                                               self.__map_view.rcl_progress_max)
+                    else:
+                        rcl_info = "Reversed {:>4}/{:>4}".format(self.__map_view.rcl_progress,
+                                                                 self.__map_view.rcl_progress_max)
+                    for i in range(len(rcl_bar)):
+                        screen.addstr(2, 2 + len(room_name) + i,
+                                      rcl_info[i] if i < len(rcl_info) else " ",
+                                      curses.color_pair(rcl_bar[i]))
+
                 if self.__pause_map:
                     screen.addstr(2, self.__room_display_left + self.__room_display_width - len("PAUSE"),
                                   "PAUSE", curses.color_pair(1))
@@ -582,32 +646,49 @@ class Render(object):
 
                 # render stat
                 cpu_bar = [1] * (self.__room_display_width - 1)
-                for i in range(int(1.0 * self.__map_view.cpu / self.__map_view.cpu_max * len(cpu_bar))):
+                cpu_rate = min(1.0 * self.__map_view.cpu / self.__map_view.cpu_max, 1)
+                for i in range(int(cpu_rate * len(cpu_bar))):
                     cpu_bar[i] = 6
-                cpu_info = "CPU:{: >3}/{: >3}".format(self.__map_view.cpu, self.__map_view.cpu_max)
+                cpu_info = "CPU:{:>3}/{:>3}".format(self.__map_view.cpu, self.__map_view.cpu_max)
                 for i in range(len(cpu_bar)):
                     screen.addstr(self.__room_display_top + self.__room_display_height + 3 + 6,
                                   self.__room_display_left + i,
                                   cpu_info[i] if i < len(cpu_info) else " ",
                                   curses.color_pair(cpu_bar[i]))
 
+                bucket_bar = [1] * (self.__room_display_width - 1)
+                bucket_rate = min(1.0 * self.__map_view.bucket / self.__map_view.bucket_max, 1)
+                for i in range(int(bucket_rate * len(bucket_bar))):
+                    bucket_bar[i] = 6
+                bucket_info = "Bucket:{:>5}/{:>5}".format(self.__map_view.bucket, self.__map_view.bucket_max)
+                for i in range(len(bucket_bar)):
+                    screen.addstr(self.__room_display_top + self.__room_display_height + 3 + 7,
+                                  self.__room_display_left + i,
+                                  bucket_info[i] if i < len(bucket_info) else " ",
+                                  curses.color_pair(bucket_bar[i]))
+
                 memory_bar = [1] * (self.__room_display_width - 1)
-                for i in range(int(1.0 * self.__map_view.memory / self.__map_view.memory_max * len(memory_bar))):
+                memory_rate = min(1.0 * self.__map_view.memory / self.__map_view.memory_max, 1)
+                for i in range(int(memory_rate * len(memory_bar))):
                     memory_bar[i] = 6
                 memory_info = "Memory:{:7.2f}K/{:7.2f}K".format(self.__map_view.memory / 1024.0,
                                                                 self.__map_view.memory_max / 1024.0)
                 for i in range(len(memory_bar)):
-                    screen.addstr(self.__room_display_top + self.__room_display_height + 3 + 7,
+                    screen.addstr(self.__room_display_top + self.__room_display_height + 3 + 8,
                                   self.__room_display_left + i,
                                   memory_info[i] if i < len(memory_info) else " ",
                                   curses.color_pair(memory_bar[i]))
 
-                # TODO: bucket, gcl (api map-stat)
                 # TODO: Credits, Power (no api found)
-                screen.addstr(self.__room_display_top + self.__room_display_height + 3 + 8,
+                screen.addstr(self.__room_display_top + self.__room_display_height + 3 + 9,
                               self.__room_display_left,
-                              "Tick Duration: {}ms, Game Time: {:,} ".format(self.__map_view.tick_duration,
-                                                                             self.__map_view.game_time % 1000000000),
+                              "GCL: {} "
+                              .format(self.__map_view.gcl),
+                              curses.color_pair(0))
+                screen.addstr(self.__room_display_top + self.__room_display_height + 3 + 10,
+                              self.__room_display_left,
+                              "Tick Duration: {}ms, Game Time: {:,} "
+                              .format(self.__map_view.tick_duration, self.__map_view.game_time % 1000000000),
                               curses.color_pair(0))
 
                 if self.__map_view.menu_depth > -1:
@@ -716,7 +797,8 @@ class Render(object):
 
             if event.name == "r" and keyboard.is_pressed("ctrl"):
                 self.__map_view.stop()
-                self.__map_view = MapView()
+                room_name = self.__map_view.room_name
+                self.__map_view = MapView(room_name)
                 self.__map_view.watch()
                 return
 

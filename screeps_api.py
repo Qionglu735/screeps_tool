@@ -653,12 +653,3 @@ if __name__ == "__main__":
     import config
     api = Api(config.SERVER_HOST, config.SERVER_PORT, config.USERNAME, config.PASSWORD)
     print(api.get_time())
-    print(api.get_tick())
-
-    # print(api.set_username(config.USERNAME, config.PASSWORD))
-    # import screeps_auto_push
-    # screeps_auto_push.main()
-    # print(api.set_active_branch(config.BRANCH_NAME))
-    # print(api.post_user_console("Memory.LoopControl = -1"))
-
-    print(api.map_stat(["W8N3"]))
