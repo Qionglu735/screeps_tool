@@ -180,7 +180,7 @@ class MapView(object):
                 if self.rcl == 0:
                     self.rcl_progress = 0
                     self.rcl_progress_max = 5000
-                    if "reservation" in self.__room_object[i]:
+                    if "reservation" in self.__room_object[i] and self.__room_object[i]["reservation"] is not None:
                         # _id = self.__api.get_me()["_id"]
                         if "id" not in self.__room_object[i]["reservation"]:
                             self.rcl_progress = self.__room_object[i]["reservation"]["endTime"] - self.game_time
