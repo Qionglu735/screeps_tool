@@ -235,32 +235,37 @@ class MapView(object):
     def get_matrix(self):
         return self.__room_matrix
 
-    def get_info(self):
+    def get_info(self, _id=None):
         info_list = list()
-        for i, item in self.__room_object.items():
-            if item is not None and "room" in item and item["room"] == self.room_name \
-                    and item["x"] == self.room_x and item["y"] == self.room_y:
-                # log(json.dumps(item))
-                info = copy.deepcopy(item)
-                try:
-                    if "body" in info:
-                        body = list()
-                        for part in info["body"]:
-                            body.append(config.CHAR_BODY_PART[part["type"]]
-                                        if part["type"] in config.CHAR_BODY_PART else "?")
-                        info["body"] = "".join(body)
-                    if "creepBody" in info:
-                        body = list()
-                        for part in info["creepBody"]:
-                            body.append(config.CHAR_BODY_PART[part]
-                                        if part in config.CHAR_BODY_PART else "?")
-                        info["creepBody"] = "".join(body)
-                except KeyError:
-                    log(json.dumps(item))
-                for key in ["meta", "$loki", "actionLog"]:
-                    if key in info:
-                        del info[key]
-                info_list.append(info)
+        if _id is not None:
+            if _id in self.__room_object and self.__room_object[_id] is not None:
+                info_list.append(copy.deepcopy(self.__room_object[_id]))
+        else:
+            for i, item in self.__room_object.items():
+                if item is not None and "room" in item and item["room"] == self.room_name \
+                        and item["x"] == self.room_x and item["y"] == self.room_y:
+                    # log(json.dumps(item))
+                    info_list.append(copy.deepcopy(item))
+        for info in info_list:
+            try:
+                if "body" in info:
+                    body = list()
+                    for part in info["body"]:
+                        body.append(config.CHAR_BODY_PART[part["type"]]
+                                    if part["type"] in config.CHAR_BODY_PART else "?")
+                    info["body"] = "".join(body)
+                if "creepBody" in info:
+                    body = list()
+                    for part in info["creepBody"]:
+                        body.append(config.CHAR_BODY_PART[part]
+                                    if part in config.CHAR_BODY_PART else "?")
+                    info["creepBody"] = "".join(body)
+            except KeyError:
+                log("KeyError: 264")
+                log(json.dumps(info))
+            for key in ["meta", "$loki", "actionLog"]:
+                if key in info:
+                    del info[key]
         return info_list[:5]
 
     def change_room(self, direction_1, direction_2=""):
@@ -513,8 +518,11 @@ class Render(object):
         self.__room_max_width, self.__room_max_height = 50, 50
         self.__room_view_left, self.__room_view_right = 0, self.__room_display_width
         self.__room_view_top, self.__room_view_bottom = 0, self.__room_display_height
+
         self.__room_object_info = list()
         self.__room_object_selected = 0
+        self.__room_object_focused = None  # focused object _id
+
         self.__cursor_x = self.__room_display_left + self.__room_display_width // 2 - 1
         self.__cursor_y = self.__room_display_top + self.__room_display_height // 2 - 1
         self.__shift_step = 5
@@ -632,11 +640,11 @@ class Render(object):
                                   line, curses.color_pair(0))
 
                 # render object list
-                room_x = self.__cursor_x - self.__room_display_left + self.__room_view_left
-                room_y = self.__cursor_y - self.__room_display_top + self.__room_view_top
+                # room_x = self.__cursor_x - self.__room_display_left + self.__room_view_left
+                # room_y = self.__cursor_y - self.__room_display_top + self.__room_view_top
                 screen.addstr(self.__room_display_top + self.__room_display_height + 1,
                               self.__room_display_left + self.__room_display_width - len("Position x:XX y:YY") - 1,
-                              "Position x:{: >2} y:{: >2}".format(room_x, room_y),
+                              "Position x:{: >2} y:{: >2}".format(self.__map_view.room_x, self.__map_view.room_y),
                               curses.color_pair(0))
                 for y, obj in enumerate(self.__room_object_info):
                     screen.addstr(self.__room_display_top + self.__room_display_height + 3 + y,
@@ -706,16 +714,13 @@ class Render(object):
                                           if y == self.__map_view.menu_selected else curses.color_pair(0))
                 else:
                     # render info
-                    self.__room_object_info = self.__map_view.get_info()
-                    self.__room_object_selected = self.__room_object_selected \
-                        if self.__room_object_selected < len(self.__room_object_info) else 0
-                    if len(self.__room_object_info) > 0:
+                    focused_info = self.__map_view.get_info(_id=self.__room_object_focused)
+                    if len(focused_info) > 0:
                         # log(json.dumps(self.__room_object_info[0], indent=4, sort_keys=True))
                         screen.addstr(2, 55,
-                                      "{} {} {}".format(self.__room_object_info[self.__room_object_selected]["type"],
-                                                        self.__map_view.room_x, self.__map_view.room_y),
+                                      "{} {}".format(focused_info[0]["type"], self.__room_object_focused),
                                       curses.color_pair(0))
-                        info_list = json.dumps(self.__room_object_info[self.__room_object_selected],
+                        info_list = json.dumps(focused_info[0],
                                                indent=4, sort_keys=True).splitlines()
                         for y, line in enumerate(info_list[: self.__screen_height - 5]):
                             screen.addstr(4 + y, 55,
@@ -800,6 +805,8 @@ class Render(object):
                 room_name = self.__map_view.room_name
                 self.__map_view = MapView(room_name)
                 self.__map_view.watch()
+                self.__map_view.room_x = self.__cursor_x - self.__room_display_left + self.__room_view_left
+                self.__map_view.room_y = self.__cursor_y - self.__room_display_top + self.__room_view_top
                 return
 
             if event.name.lower() in "hjklyubn" \
@@ -974,10 +981,15 @@ class Render(object):
                 # update position after moving the cursor
                 self.__map_view.room_x = self.__cursor_x - self.__room_display_left + self.__room_view_left
                 self.__map_view.room_y = self.__cursor_y - self.__room_display_top + self.__room_view_top
+                self.__room_object_info = self.__map_view.get_info()
+                if len(self.__room_object_info) > 0:
+                    self.__room_object_selected = 0
+                    self.__room_object_focused = self.__room_object_info[0]["_id"]
 
             if event.name == "tab":
                 if len(self.__room_object_info) > 0:
                     self.__room_object_selected = (self.__room_object_selected + 1) % len(self.__room_object_info)
+                    self.__room_object_focused = self.__room_object_info[self.__room_object_selected]["_id"]
 
             if event.name == "enter" or event.name == "right":
                 self.__map_view.nav_menu("enter")
