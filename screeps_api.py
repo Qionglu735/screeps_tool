@@ -457,6 +457,33 @@ class Api(object):
     #     COLOR_GREY: 9,
     #     COLOR_WHITE: 10,
 
+    # /api/game/market
+    def order_index(self):
+        return self.get(
+            "/api/game/market/orders-index"
+        )
+
+    def get_order(self, resource_type=None):
+        return self.get(
+            "/api/game/market/orders",
+            params={
+                "resourceType": resource_type,
+            },
+        )
+
+    def my_order(self):
+        return self.get(
+            "/api/game/market/my-orders",
+        )
+
+    def market_stat(self, resource_type=None):
+        return self.get(
+            "/api/game/market/stats",
+            params={
+                "resourceType": resource_type,
+            },
+        )
+
     # /api/register
     def check_email(self, email):
         return self.get(
@@ -565,14 +592,13 @@ class Api(object):
         memory = self.get(
             "/api/user/memory",
         )
-        if raw:
-            return memory
-        import base64
-        import zlib
-        import json
-        byte_string = base64.b64decode(memory["data"][3:])
-        json_string = zlib.decompress(byte_string, 15 + 32)
-        memory["data"] = json.loads(json_string)
+        if not raw:
+            import base64
+            byte_string = base64.b64decode(memory["data"][3:])
+            import zlib
+            json_string = zlib.decompress(byte_string, 15 + 32)
+            import json
+            memory["data"] = json.loads(json_string)
         return memory
 
     def get_user_stat(self):
@@ -653,3 +679,10 @@ if __name__ == "__main__":
     import config
     api = Api(config.SERVER_HOST, config.SERVER_PORT, config.USERNAME, config.PASSWORD)
     print(api.get_time())
+
+    for i in api.order_index()["list"]:
+        print(i)
+    for i in api.get_order("energy")["list"]:
+        print(i)
+    print(api.get("/api/game/market/my-orders"))
+    print(api.get("/api/game/market/stats"))

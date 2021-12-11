@@ -3,8 +3,6 @@
 
 import copy
 import curses
-import threading
-
 import datetime
 import json
 import linecache
@@ -12,11 +10,18 @@ import keyboard
 import re
 import os
 import pyperclip
+import shutil
 import sys
+import threading
+import time
+import traceback
 
 import config
 import screeps_api
 import screeps_auto_push
+
+CLIENT_LOG_FILE = "log/client.log"
+CONSOLE_LOG_FILE = "log/console.log"
 
 
 class MapView(object):
@@ -34,7 +39,7 @@ class MapView(object):
         self.__room_matrix = [["." for _ in range(50)] for _ in range(50)]
         self.__room_object = dict()
 
-        self.rcl = 1
+        self.rcl = 0
         self.rcl_progress = 0
         self.rcl_progress_max = 1
 
@@ -55,6 +60,7 @@ class MapView(object):
 
         self.room_x = 24
         self.room_y = 15
+        self.object_focused = None  # focused object _id
 
         self.__confirm_menu_template = [
             {
@@ -66,7 +72,7 @@ class MapView(object):
                 "sub_menu": None,
             },
         ]
-        self.operate_menu = {
+        self.__operate_menu = {
             "item": "operation_menu",
             "sub_menu": [
                 {
@@ -142,7 +148,7 @@ class MapView(object):
         }
         self.current_menu = None
         self.menu_depth = -1
-        self.menu_path = list()
+        self.__menu_path = list()
         self.menu_selected = 0
 
     def watch(self):
@@ -175,7 +181,7 @@ class MapView(object):
             else:
                 self.__room_object[i].update(item)
             if self.__room_object[i]["type"] == "controller":
-                log(i, self.__room_object[i]["type"], self.__room_object[i])
+                # log(i, self.__room_object[i]["type"], self.__room_object[i])
                 self.rcl = self.__room_object[i]["level"]
                 if self.rcl == 0:
                     self.rcl_progress = 0
@@ -195,6 +201,8 @@ class MapView(object):
                         6: 3645000,
                         7: 10935000,
                     }[self.rcl]
+            if "actionLog" in item:
+                log("_id:", item["_id"], item["actionLog"])
 
         # for i in self.__room_object:
         #     if self.__room_object[i]["room"] == self.__room_name and i not in data:
@@ -227,6 +235,8 @@ class MapView(object):
                 if i["type"] in config.CHAR_MAP else "?"
         for i, item in self.__room_object.items():
             if item["room"] == self.room_name:
+                # if item["type"] == "creep" and item["spawning"] is True:
+                #     continue
                 self.__room_matrix[int(item["y"])][int(item["x"])] = config.CHAR_MAP[item["type"]] \
                     if item["type"] in config.CHAR_MAP else "?"
         # for i in self.__room_matrix:
@@ -260,10 +270,14 @@ class MapView(object):
                         body.append(config.CHAR_BODY_PART[part]
                                     if part in config.CHAR_BODY_PART else "?")
                     info["creepBody"] = "".join(body)
+                if "actionLog" in info:
+                    for key, item in info["actionLog"].items():
+                        if item is None:
+                            del info["actionLog"][key]
             except KeyError:
                 log("KeyError: 264")
                 log(json.dumps(info))
-            for key in ["meta", "$loki", "actionLog"]:
+            for key in ["meta", "$loki"]:
                 if key in info:
                     del info[key]
         return info_list[:5]
@@ -343,13 +357,13 @@ class MapView(object):
     def nav_menu(self, op):
         if op == "enter":
             self.menu_depth += 1
-            if self.menu_depth < len(self.menu_path):
-                self.menu_path[self.menu_depth] = self.menu_selected
+            if self.menu_depth < len(self.__menu_path):
+                self.__menu_path[self.menu_depth] = self.menu_selected
             else:
-                self.menu_path.append(self.menu_selected)
-            self.current_menu = self.operate_menu
+                self.__menu_path.append(self.menu_selected)
+            self.current_menu = self.__operate_menu
             for i in range(1, self.menu_depth + 1):
-                self.current_menu = self.current_menu["sub_menu"][self.menu_path[i]]
+                self.current_menu = self.current_menu["sub_menu"][self.__menu_path[i]]
             if self.current_menu["sub_menu"] is None:
                 path = self.get_menu_path_item()
                 log(path)
@@ -359,13 +373,24 @@ class MapView(object):
                     self.__api.place_construction_site(self.room_name, self.room_x, self.room_y, path[1])
                 elif path[0] == "Create Flag":
                     pass  # TODO: Menu -> API
-                elif path[0] == "Delete":
-                    pass  # TODO: Menu -> API
+                elif path[0] == "Delete" and path[1] == "CONFIRM":
+                    info_list = self.get_info(self.object_focused)
+                    if len(info_list) > 0:
+                        log("delete", info_list[0]["type"], info_list[0]["_id"])
+                        if info_list[0]["type"] == "creep":
+                            self.__api.remove_creep(info_list[0]["_id"])
+                        elif info_list[0]["type"] == "constructionSite":
+                            self.__api.remove_construction_site(info_list[0]["_id"])
+                        elif info_list[0]["type"] == "flag":
+                            pass  # TODO: Menu -> API
+                        else:
+                            self.__api.remove_structure(info_list[0]["_id"])
+
                 self.menu_depth = -1
                 self.current_menu = None
             else:
-                if self.menu_depth + 1 < len(self.menu_path):
-                    self.menu_selected = self.menu_path[self.menu_depth + 1]
+                if self.menu_depth + 1 < len(self.__menu_path):
+                    self.menu_selected = self.__menu_path[self.menu_depth + 1]
                     if self.menu_selected >= len(self.current_menu["sub_menu"]):
                         self.menu_selected = 0
                 else:
@@ -376,10 +401,10 @@ class MapView(object):
             if self.menu_depth == -1:
                 self.current_menu = None
             else:
-                self.current_menu = self.operate_menu
+                self.current_menu = self.__operate_menu
                 for i in range(1, self.menu_depth + 1):
-                    self.current_menu = self.current_menu["sub_menu"][self.menu_path[i]]
-                self.menu_selected = self.menu_path[self.menu_depth + 1]
+                    self.current_menu = self.current_menu["sub_menu"][self.__menu_path[i]]
+                self.menu_selected = self.__menu_path[self.menu_depth + 1]
         elif op == "down":
             if self.menu_depth != -1:
                 self.menu_selected = (self.menu_selected + 1) % len(self.current_menu["sub_menu"])
@@ -395,9 +420,9 @@ class MapView(object):
     def get_menu_path_item(self):
         res = list()
         if self.menu_depth > 0:
-            current_menu = self.operate_menu
+            current_menu = self.__operate_menu
             for i in range(1, self.menu_depth + 1):
-                current_menu = current_menu["sub_menu"][self.menu_path[i]]
+                current_menu = current_menu["sub_menu"][self.__menu_path[i]]
                 res.append(current_menu["item"])
         return res
 
@@ -440,6 +465,7 @@ class ConsoleView(object):
                         "log": _l,
                         "time": now,
                     })
+                    log("{}".format(_l), file=CONSOLE_LOG_FILE)
             del data["messages"]["log"]
         if "error" in data:
             for line in data["error"].split("\n"):
@@ -449,6 +475,7 @@ class ConsoleView(object):
                         "log": _l,
                         "time": now,
                     })
+                    log("{}".format(_l), file=CONSOLE_LOG_FILE)
             del data["error"]
         if "messages" in data:
             for line in data["messages"]["results"]:
@@ -458,6 +485,7 @@ class ConsoleView(object):
                         "log": _l,
                         "time": now,
                     })
+                    log("> {}".format(_l), file=CONSOLE_LOG_FILE, time_mark=False)
             del data["messages"]["results"]
         if self.__cmd is not None:
             for _l in self.__parse_line(self.__cmd):
@@ -465,6 +493,7 @@ class ConsoleView(object):
                     "type": "command",
                     "log": _l
                 })
+                log("{}".format(_l), file=CONSOLE_LOG_FILE, time_mark=False)
             self.__api.post_user_console(self.__cmd)
             self.__cmd = None
 
@@ -521,7 +550,6 @@ class Render(object):
 
         self.__room_object_info = list()
         self.__room_object_selected = 0
-        self.__room_object_focused = None  # focused object _id
 
         self.__cursor_x = self.__room_display_left + self.__room_display_width // 2 - 1
         self.__cursor_y = self.__room_display_top + self.__room_display_height // 2 - 1
@@ -580,183 +608,190 @@ class Render(object):
             screen.clear()
             self.__screen_height, self.__screen_width = screen.getmaxyx()
 
-            if self.__panel == "map":
-                screen.addstr(0, 0, "{: <16}".format("[F1]Map"), curses.color_pair(2))
-            else:
-                screen.addstr(0, 0, "{: <16}".format("[F1]Map"), curses.color_pair(1))
+            try:
+                # create an exception, for test only
+                # screen.addstr(self.__screen_height, self.__screen_width, "*", curses.color_pair(1))
 
-            if self.__panel == "console":
-                screen.addstr(0, 16, "{: <16}".format("[F2]Console"), curses.color_pair(2))
-            else:
-                screen.addstr(0, 16, "{: <16}".format("[F2]Console"), curses.color_pair(1))
+                if self.__panel == "map":
+                    screen.addstr(0, 0, "{:<16}".format("[F1]Map"), curses.color_pair(2))
+                else:
+                    screen.addstr(0, 0, "{:<16}".format("[F1]Map"), curses.color_pair(1))
 
-            if self.__panel == "memory":
-                screen.addstr(0, 32, "{: <16}".format("[F3]Memory"), curses.color_pair(2))
-            else:
-                screen.addstr(0, 32, "{: <16}".format("[F3]Memory"), curses.color_pair(1))
+                if self.__panel == "console":
+                    screen.addstr(0, 16, "{:<16}".format("[F2]Console"), curses.color_pair(2))
+                else:
+                    screen.addstr(0, 16, "{:<16}".format("[F2]Console"), curses.color_pair(1))
 
-            screen.addstr(0, 16 * 3, " " * (self.__screen_width - 16 * 4), curses.color_pair(1))
-            screen.addstr(0, self.__screen_width - 16, "{: <16}".format("[ESC]Exit"), curses.color_pair(1))
+                if self.__panel == "memory":
+                    screen.addstr(0, 32, "{:<16}".format("[F3]Memory"), curses.color_pair(2))
+                else:
+                    screen.addstr(0, 32, "{:<16}".format("[F3]Memory"), curses.color_pair(1))
 
-            if self.__panel == "map":
-                # render room info
-                room_name = "Room: {} ".format(self.__map_view.room_name)
-                screen.addstr(2, 2, room_name, curses.color_pair(0))
+                screen.addstr(0, 16 * 3, " " * (self.__screen_width - 16 * 4), curses.color_pair(1))
+                screen.addstr(0, self.__screen_width - 16, "{:<16}".format("[ESC]Exit"), curses.color_pair(1))
 
-                if self.__map_view.rcl > 0 or self.__map_view.rcl_progress > 0:
-                    rcl_bar = [1] * (self.__room_display_width - len(room_name) - len("PAUSE") - 1)
-                    rcl_rate = min(1.0 * self.__map_view.rcl_progress / self.__map_view.rcl_progress_max, 1)
-                    for i in range(int(rcl_rate * len(rcl_bar))):
-                        rcl_bar[i] = 6
-                    if self.__map_view.rcl > 0:
-                        rcl_info = "RCL:{} {:>8}/{:>8}".format(self.__map_view.rcl,
-                                                               self.__map_view.rcl_progress,
-                                                               self.__map_view.rcl_progress_max)
-                    else:
-                        rcl_info = "Reversed {:>4}/{:>4}".format(self.__map_view.rcl_progress,
-                                                                 self.__map_view.rcl_progress_max)
-                    for i in range(len(rcl_bar)):
-                        screen.addstr(2, 2 + len(room_name) + i,
-                                      rcl_info[i] if i < len(rcl_info) else " ",
-                                      curses.color_pair(rcl_bar[i]))
+                if self.__panel == "map":
+                    # render room info
+                    room_name = "Room: {} ".format(self.__map_view.room_name)
+                    screen.addstr(2, 2, room_name, curses.color_pair(0))
 
-                if self.__pause_map:
-                    screen.addstr(2, self.__room_display_left + self.__room_display_width - len("PAUSE"),
-                                  "PAUSE", curses.color_pair(1))
+                    if self.__map_view.rcl > 0 or self.__map_view.rcl_progress > 0:
+                        rcl_bar = [1] * (self.__room_display_width - len(room_name) - len("PAUSE") - 1)
+                        rcl_rate = min(1.0 * self.__map_view.rcl_progress / self.__map_view.rcl_progress_max, 1)
+                        for i in range(int(rcl_rate * len(rcl_bar))):
+                            rcl_bar[i] = 6
+                        if self.__map_view.rcl > 0:
+                            rcl_info = "RCL:{} {:>8}/{:>8}".format(self.__map_view.rcl,
+                                                                   self.__map_view.rcl_progress,
+                                                                   self.__map_view.rcl_progress_max)
+                        else:
+                            rcl_info = "Reversed {:>4}/{:>4}".format(self.__map_view.rcl_progress,
+                                                                     self.__map_view.rcl_progress_max)
+                        for i in range(len(rcl_bar)):
+                            screen.addstr(2, 2 + len(room_name) + i,
+                                          rcl_info[i] if i < len(rcl_info) else " ",
+                                          curses.color_pair(rcl_bar[i]))
 
-                # render room detail
-                for y, line in enumerate(self.__map_view.get_matrix()[self.__room_view_top: self.__room_view_bottom]):
-                    screen.addstr(self.__room_display_top + y, self.__room_display_left,
-                                  "".join(line[self.__room_view_left: self.__room_view_right]), curses.color_pair(0))
+                    if self.__pause_map:
+                        screen.addstr(2, self.__room_display_left + self.__room_display_width - len("PAUSE"),
+                                      "PAUSE", curses.color_pair(1))
 
-                # render mini map
-                screen.addstr(self.__room_display_top + self.__room_display_height + 1,
-                              self.__room_display_left,
-                              " Map:",
-                              curses.color_pair(0))
-                for y, line in enumerate(self.__map_view.get_mini_map()):
-                    screen.addstr(self.__room_display_top + self.__room_display_height + 3 + y,
+                    # render room detail
+                    for y, line in enumerate(self.__map_view.get_matrix()[self.__room_view_top: self.__room_view_bottom]):
+                        screen.addstr(self.__room_display_top + y, self.__room_display_left,
+                                      "".join(line[self.__room_view_left: self.__room_view_right]), curses.color_pair(0))
+
+                    # render mini map
+                    screen.addstr(self.__room_display_top + self.__room_display_height + 1,
                                   self.__room_display_left,
-                                  line, curses.color_pair(0))
-
-                # render object list
-                # room_x = self.__cursor_x - self.__room_display_left + self.__room_view_left
-                # room_y = self.__cursor_y - self.__room_display_top + self.__room_view_top
-                screen.addstr(self.__room_display_top + self.__room_display_height + 1,
-                              self.__room_display_left + self.__room_display_width - len("Position x:XX y:YY") - 1,
-                              "Position x:{: >2} y:{: >2}".format(self.__map_view.room_x, self.__map_view.room_y),
-                              curses.color_pair(0))
-                for y, obj in enumerate(self.__room_object_info):
-                    screen.addstr(self.__room_display_top + self.__room_display_height + 3 + y,
-                                  self.__room_display_left + self.__room_display_width - len("Position x:XX y:YY") - 1,
-                                  obj["type"],
-                                  curses.color_pair(1) if y == self.__room_object_selected else curses.color_pair(0))
-
-                # render stat
-                cpu_bar = [1] * (self.__room_display_width - 1)
-                cpu_rate = min(1.0 * self.__map_view.cpu / self.__map_view.cpu_max, 1)
-                for i in range(int(cpu_rate * len(cpu_bar))):
-                    cpu_bar[i] = 6
-                cpu_info = "CPU:{:>3}/{:>3}".format(self.__map_view.cpu, self.__map_view.cpu_max)
-                for i in range(len(cpu_bar)):
-                    screen.addstr(self.__room_display_top + self.__room_display_height + 3 + 6,
-                                  self.__room_display_left + i,
-                                  cpu_info[i] if i < len(cpu_info) else " ",
-                                  curses.color_pair(cpu_bar[i]))
-
-                bucket_bar = [1] * (self.__room_display_width - 1)
-                bucket_rate = min(1.0 * self.__map_view.bucket / self.__map_view.bucket_max, 1)
-                for i in range(int(bucket_rate * len(bucket_bar))):
-                    bucket_bar[i] = 6
-                bucket_info = "Bucket:{:>5}/{:>5}".format(self.__map_view.bucket, self.__map_view.bucket_max)
-                for i in range(len(bucket_bar)):
-                    screen.addstr(self.__room_display_top + self.__room_display_height + 3 + 7,
-                                  self.__room_display_left + i,
-                                  bucket_info[i] if i < len(bucket_info) else " ",
-                                  curses.color_pair(bucket_bar[i]))
-
-                memory_bar = [1] * (self.__room_display_width - 1)
-                memory_rate = min(1.0 * self.__map_view.memory / self.__map_view.memory_max, 1)
-                for i in range(int(memory_rate * len(memory_bar))):
-                    memory_bar[i] = 6
-                memory_info = "Memory:{:7.2f}K/{:7.2f}K".format(self.__map_view.memory / 1024.0,
-                                                                self.__map_view.memory_max / 1024.0)
-                for i in range(len(memory_bar)):
-                    screen.addstr(self.__room_display_top + self.__room_display_height + 3 + 8,
-                                  self.__room_display_left + i,
-                                  memory_info[i] if i < len(memory_info) else " ",
-                                  curses.color_pair(memory_bar[i]))
-
-                # TODO: Credits, Power (no api found)
-                screen.addstr(self.__room_display_top + self.__room_display_height + 3 + 9,
-                              self.__room_display_left,
-                              "GCL: {} "
-                              .format(self.__map_view.gcl),
-                              curses.color_pair(0))
-                screen.addstr(self.__room_display_top + self.__room_display_height + 3 + 10,
-                              self.__room_display_left,
-                              "Tick Duration: {}ms, Game Time: {:,} "
-                              .format(self.__map_view.tick_duration, self.__map_view.game_time % 1000000000),
-                              curses.color_pair(0))
-
-                if self.__map_view.menu_depth > -1:
-                    # render menu
-                    screen.addstr(2, 55, "Operation Menu", curses.color_pair(0))
-                    menu_path = self.__map_view.get_menu_path_item()
-                    for indent, line in enumerate(self.__map_view.get_menu_path_item()):
-                        screen.addstr(4 + indent, 55 + 4 * indent,
+                                  " Map:",
+                                  curses.color_pair(0))
+                    for y, line in enumerate(self.__map_view.get_mini_map()):
+                        screen.addstr(self.__room_display_top + self.__room_display_height + 3 + y,
+                                      self.__room_display_left,
                                       line, curses.color_pair(0))
-                    if self.__map_view.current_menu["sub_menu"] is not None:
-                        for y, line in enumerate(self.__map_view.current_menu["sub_menu"]):
-                            screen.addstr(4 + len(menu_path) + y, 55 + 4 * len(menu_path),
-                                          line["item"][:self.__screen_width - 55 - 4 * len(menu_path)],
-                                          curses.color_pair(1)
-                                          if y == self.__map_view.menu_selected else curses.color_pair(0))
-                else:
-                    # render info
-                    focused_info = self.__map_view.get_info(_id=self.__room_object_focused)
-                    if len(focused_info) > 0:
-                        # log(json.dumps(self.__room_object_info[0], indent=4, sort_keys=True))
-                        screen.addstr(2, 55,
-                                      "{} {}".format(focused_info[0]["type"], self.__room_object_focused),
-                                      curses.color_pair(0))
-                        info_list = json.dumps(focused_info[0],
-                                               indent=4, sort_keys=True).splitlines()
-                        for y, line in enumerate(info_list[: self.__screen_height - 5]):
-                            screen.addstr(4 + y, 55,
-                                          line[:self.__screen_width - 55], curses.color_pair(0))
 
-                screen.move(self.__cursor_y, self.__cursor_x)
+                    # render object list
+                    # room_x = self.__cursor_x - self.__room_display_left + self.__room_view_left
+                    # room_y = self.__cursor_y - self.__room_display_top + self.__room_view_top
+                    screen.addstr(self.__room_display_top + self.__room_display_height + 1,
+                                  self.__room_display_left + self.__room_display_width - len("Position x:XX y:YY") - 1,
+                                  "Position x:{:>2} y:{:>2}".format(self.__map_view.room_x, self.__map_view.room_y),
+                                  curses.color_pair(0))
+                    for y, obj in enumerate(self.__room_object_info):
+                        screen.addstr(self.__room_display_top + self.__room_display_height + 3 + y,
+                                      self.__room_display_left + self.__room_display_width - len("Position x:XX y:YY") - 1,
+                                      obj["type"],
+                                      curses.color_pair(1) if y == self.__room_object_selected else curses.color_pair(0))
 
-            elif self.__panel == "console":
-                log_list = self.__console_view.get_log()
-                index_range = self.__screen_height - 2 if len(log_list) > self.__screen_height else len(log_list)
-                if len(log_list) <= self.__screen_height - 2:
-                    index_start = 0
-                elif self.__log_index == -1:
-                    index_start = len(log_list) - index_range
-                else:
-                    index_start = self.__log_index
-                for i in range(index_start, index_start + index_range):
-                    if i >= len(log_list):  # BUG: index_start + index_range > len(log_list)
-                        break
-                    # log("{} {} {}".format(i, log_list[i]["type"], log_list[i]["log"]))
-                    if log_list[i]["type"] == "error":
-                        screen.addstr(1 + i - index_start, 0, log_list[i]["log"], curses.color_pair(3))
-                    elif log_list[i]["type"] == "command":
-                        screen.addstr(1 + i - index_start, 0, "> {}".format(log_list[i]["log"]), curses.color_pair(4))
-                    elif log_list[i]["type"] == "output":
-                        screen.addstr(1 + i - index_start, 0, log_list[i]["log"], curses.color_pair(5))
+                    # render stat
+                    cpu_bar = [1] * (self.__room_display_width - 1)
+                    cpu_rate = min(1.0 * self.__map_view.cpu / self.__map_view.cpu_max, 1)
+                    for i in range(int(cpu_rate * len(cpu_bar))):
+                        cpu_bar[i] = 6
+                    cpu_info = "CPU:{:>3}/{:>3}".format(self.__map_view.cpu, self.__map_view.cpu_max)
+                    for i in range(len(cpu_bar)):
+                        screen.addstr(self.__room_display_top + self.__room_display_height + 3 + 6,
+                                      self.__room_display_left + i,
+                                      cpu_info[i] if i < len(cpu_info) else " ",
+                                      curses.color_pair(cpu_bar[i]))
+
+                    bucket_bar = [1] * (self.__room_display_width - 1)
+                    bucket_rate = min(1.0 * self.__map_view.bucket / self.__map_view.bucket_max, 1)
+                    for i in range(int(bucket_rate * len(bucket_bar))):
+                        bucket_bar[i] = 6
+                    bucket_info = "Bucket:{:>5}/{:>5}".format(self.__map_view.bucket, self.__map_view.bucket_max)
+                    for i in range(len(bucket_bar)):
+                        screen.addstr(self.__room_display_top + self.__room_display_height + 3 + 7,
+                                      self.__room_display_left + i,
+                                      bucket_info[i] if i < len(bucket_info) else " ",
+                                      curses.color_pair(bucket_bar[i]))
+
+                    memory_bar = [1] * (self.__room_display_width - 1)
+                    memory_rate = min(1.0 * self.__map_view.memory / self.__map_view.memory_max, 1)
+                    for i in range(int(memory_rate * len(memory_bar))):
+                        memory_bar[i] = 6
+                    memory_info = "Memory:{:7.2f}K/{:7.2f}K".format(self.__map_view.memory / 1024.0,
+                                                                    self.__map_view.memory_max / 1024.0)
+                    for i in range(len(memory_bar)):
+                        screen.addstr(self.__room_display_top + self.__room_display_height + 3 + 8,
+                                      self.__room_display_left + i,
+                                      memory_info[i] if i < len(memory_info) else " ",
+                                      curses.color_pair(memory_bar[i]))
+
+                    # TODO: Credits, Power (no api found)
+                    screen.addstr(self.__room_display_top + self.__room_display_height + 3 + 9,
+                                  self.__room_display_left,
+                                  "GCL: {} "
+                                  .format(self.__map_view.gcl),
+                                  curses.color_pair(0))
+                    screen.addstr(self.__room_display_top + self.__room_display_height + 3 + 10,
+                                  self.__room_display_left,
+                                  "Tick Duration: {}ms, Game Time: {:,} "
+                                  .format(self.__map_view.tick_duration, self.__map_view.game_time % 1000000000),
+                                  curses.color_pair(0))
+
+                    if self.__map_view.menu_depth > -1:
+                        # render menu
+                        screen.addstr(2, 55, "Operation Menu", curses.color_pair(0))
+                        menu_path = self.__map_view.get_menu_path_item()
+                        for indent, line in enumerate(self.__map_view.get_menu_path_item()):
+                            screen.addstr(4 + indent, 55 + 4 * indent,
+                                          line, curses.color_pair(0))
+                        if self.__map_view.current_menu["sub_menu"] is not None:
+                            for y, line in enumerate(self.__map_view.current_menu["sub_menu"]):
+                                screen.addstr(4 + len(menu_path) + y, 55 + 4 * len(menu_path),
+                                              line["item"][:self.__screen_width - 55 - 4 * len(menu_path)],
+                                              curses.color_pair(1)
+                                              if y == self.__map_view.menu_selected else curses.color_pair(0))
                     else:
-                        screen.addstr(1 + i - index_start, 0, log_list[i]["log"], curses.color_pair(0))
-                cmd = copy.deepcopy(self.__cmd)[self.__cmd_left:][:self.__screen_width - 2 - 1]
-                screen.addstr(self.__screen_height - 1, 0, "> ", curses.color_pair(1))
-                for i, ch in enumerate(cmd):
-                    screen.insch(self.__screen_height - 1, 2 + i, str(ch), curses.color_pair(1))
-                for i in range(2 + len(cmd), self.__screen_width):
-                    screen.insch(self.__screen_height - 1, i, " ", curses.color_pair(1))
+                        # render info
+                        focused_info = self.__map_view.get_info(_id=self.__map_view.object_focused)
+                        if len(focused_info) > 0:
+                            # log(json.dumps(self.__room_object_info[0], indent=4, sort_keys=True))
+                            screen.addstr(2, 55,
+                                          "{} {}".format(focused_info[0]["type"], self.__map_view.object_focused),
+                                          curses.color_pair(0))
+                            info_list = json.dumps(focused_info[0],
+                                                   indent=4, sort_keys=True).splitlines()
+                            for y, line in enumerate(info_list[: self.__screen_height - 5]):
+                                screen.addstr(4 + y, 55,
+                                              line[:self.__screen_width - 55], curses.color_pair(0))
 
-                screen.move(self.__screen_height - 1, 2 + self.__cursor_pos)
+                    screen.move(self.__cursor_y, self.__cursor_x)
+
+                elif self.__panel == "console":
+                    log_list = self.__console_view.get_log()
+                    index_range = self.__screen_height - 2 if len(log_list) > self.__screen_height else len(log_list)
+                    if len(log_list) <= self.__screen_height - 2:
+                        index_start = 0
+                    elif self.__log_index == -1:
+                        index_start = len(log_list) - index_range
+                    else:
+                        index_start = self.__log_index
+                    for i in range(index_start, index_start + index_range):
+                        if i >= len(log_list):  # BUG: index_start + index_range > len(log_list)
+                            break
+                        # log("{} {} {}".format(i, log_list[i]["type"], log_list[i]["log"]))
+                        if log_list[i]["type"] == "error":
+                            screen.addstr(1 + i - index_start, 0, log_list[i]["log"], curses.color_pair(3))
+                        elif log_list[i]["type"] == "command":
+                            screen.addstr(1 + i - index_start, 0, "> {}".format(log_list[i]["log"]), curses.color_pair(4))
+                        elif log_list[i]["type"] == "output":
+                            screen.addstr(1 + i - index_start, 0, log_list[i]["log"], curses.color_pair(5))
+                        else:
+                            screen.addstr(1 + i - index_start, 0, log_list[i]["log"], curses.color_pair(0))
+                    cmd = copy.deepcopy(self.__cmd)[self.__cmd_left:][:self.__screen_width - 2 - 1]
+                    screen.addstr(self.__screen_height - 1, 0, "> ", curses.color_pair(1))
+                    for i, ch in enumerate(cmd):
+                        screen.insch(self.__screen_height - 1, 2 + i, str(ch), curses.color_pair(1))
+                    for i in range(2 + len(cmd), self.__screen_width):
+                        screen.insch(self.__screen_height - 1, i, " ", curses.color_pair(1))
+
+                    screen.move(self.__screen_height - 1, 2 + self.__cursor_pos)
+            except curses.error:
+                log(traceback.format_exc())
+                time.sleep(1)
 
             # Refresh the screen
             screen.refresh()
@@ -984,12 +1019,12 @@ class Render(object):
                 self.__room_object_info = self.__map_view.get_info()
                 if len(self.__room_object_info) > 0:
                     self.__room_object_selected = 0
-                    self.__room_object_focused = self.__room_object_info[0]["_id"]
+                    self.__map_view.object_focused = self.__room_object_info[0]["_id"]
 
             if event.name == "tab":
                 if len(self.__room_object_info) > 0:
                     self.__room_object_selected = (self.__room_object_selected + 1) % len(self.__room_object_info)
-                    self.__room_object_focused = self.__room_object_info[self.__room_object_selected]["_id"]
+                    self.__map_view.object_focused = self.__room_object_info[self.__room_object_selected]["_id"]
 
             if event.name == "enter" or event.name == "right":
                 self.__map_view.nav_menu("enter")
@@ -1103,7 +1138,7 @@ class AutoPush(threading.Thread):
 
     def run(self):
         screeps_auto_push.DAEMON_MODE = True
-        screeps_auto_push.main("log")
+        screeps_auto_push.main(CLIENT_LOG_FILE)
 
     @staticmethod
     def stop():
@@ -1128,15 +1163,20 @@ def sign_in():
                 if "ok" not in api.get_me():
                     return False
                 # upload script and set active branch
-                import screeps_auto_push
                 screeps_auto_push.main()
                 log(api.set_active_branch(config.BRANCH_NAME))
     return True
 
 
-def log(*args):
+def log(*args, **kwargs):
     time_mark = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
-    with open("log", "a") as f:
+    log_file = CLIENT_LOG_FILE
+    if "file" in kwargs:
+        log_file = kwargs["file"]
+    if "time_mark" in kwargs:
+        if kwargs["time_mark"] is False:
+            time_mark = ""
+    with open(log_file, "a") as f:
         f.write(time_mark)
         for i, v in enumerate(args):
             if i > 0:
@@ -1191,11 +1231,7 @@ def keyboard_event_test(x):
     print(x.to_json(), keyboard.is_pressed("ctrl"), keyboard.is_pressed("shift"), keyboard.is_pressed("alt"))
 
 
-if __name__ == "__main__":
-    # keyboard.on_press(lambda event: keyboard_event_test(event))
-    # while True:
-    #     pass
-
+def main():
     if sys.platform == "win32":
         os.system("title screeps-client")
         os.system("mode con: cols=120 lines=50")
@@ -1208,7 +1244,20 @@ if __name__ == "__main__":
             raw_input()
         exit()
     clear_output()
-    sys.excepthook = exception_hook
+    # sys.excepthook = exception_hook
+    if not os.path.isdir("log"):
+        os.mkdir("log")
+    if os.path.isfile(CLIENT_LOG_FILE):
+        for i in range(8, 0, -1):
+            if os.path.isfile("log/client-{}.log".format(i)):
+                shutil.move("log/client-{}.log".format(i), "log/client-{}.log".format(i + 1))
+        shutil.move("log/client.log", "log/client-1.log")
+        log("client start")
+    if os.path.isfile(CONSOLE_LOG_FILE):
+        for i in range(8, 0, -1):
+            if os.path.isfile("log/console-{}.log".format(i)):
+                shutil.move("log/console-{}.log".format(i), "log/console-{}.log".format(i + 1))
+        shutil.move("log/console.log", "log/console-1.log")
 
     # on start
     auto_push = AutoPush()
@@ -1224,3 +1273,11 @@ if __name__ == "__main__":
     keyboard.unhook_all()
     flush_input()
     clear_output()
+
+
+if __name__ == "__main__":
+    # keyboard.on_press(lambda event: keyboard_event_test(event))
+    # while True:
+    #     pass
+
+    main()
