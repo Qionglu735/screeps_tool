@@ -680,9 +680,17 @@ if __name__ == "__main__":
     api = Api(config.SERVER_HOST, config.SERVER_PORT, config.USERNAME, config.PASSWORD)
     print(api.get_time())
 
-    for i in api.order_index()["list"]:
-        print(i)
-    for i in api.get_order("energy")["list"]:
-        print(i)
-    print(api.get("/api/game/market/my-orders"))
-    print(api.get("/api/game/market/stats"))
+    # socket = Socket(config.SERVER_HOST, config.SERVER_PORT, config.USERNAME, config.PASSWORD)
+    # socket.subscribe("room", "W8N3")
+    #
+    # def callback(msg):
+    #     print msg
+    # socket.callback = callback
+    # socket.start()
+
+    # for i in api.order_index()["list"]:
+    #     print(i)
+    # for i in api.get_order("energy")["list"]:
+    #     print(i)
+    # print(api.get("/api/game/market/my-orders"))
+    # print(api.get("/api/game/market/stats"))

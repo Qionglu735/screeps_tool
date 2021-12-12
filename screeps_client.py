@@ -175,11 +175,11 @@ class MapView(object):
     def __room_callback(self, message):
         data = json.loads(message)[1]["objects"]
         for i, item in data.items():
-            # log(i, item["type"], item)
             if i not in self.__room_object:
                 self.__room_object[i] = item
             else:
                 self.__room_object[i].update(item)
+            # log(i, self.__room_object[i]["type"], item)
             if self.__room_object[i]["type"] == "controller":
                 # log(i, self.__room_object[i]["type"], self.__room_object[i])
                 self.rcl = self.__room_object[i]["level"]
@@ -200,11 +200,30 @@ class MapView(object):
                         5: 1215000,
                         6: 3645000,
                         7: 10935000,
+                        8: 100000000,  # TODO: check exact value
                     }[self.rcl]
             if "actionLog" in item:
-                log("_id:", item["_id"], item["actionLog"])
+                __action_log_list = [{x: y} for x, y in item["actionLog"].items() if y is not None]
+                if len(__action_log_list) > 0:
+                    try:
+                        if "ageTime" in self.__room_object[i]:
+                            log(self.__room_object[i]["name"],
+                                "{}({})".format(self.__room_object[i]["ageTime"] - self.game_time,
+                                                self.__room_object[i]["ageTime"]),
+                                i, __action_log_list)
+                        else:
+                            log(self.__room_object[i]["name"]
+                                if "name" in self.__room_object[i] else "name?",
+                                i, __action_log_list)
+                    except Exception:
+                        log(traceback.format_exc())
 
-        # for i in self.__room_object:
+        for i in self.__room_object:
+            if "ageTime" in self.__room_object[i] and self.__room_object[i]["ageTime"] < self.game_time:
+                log(self.__room_object[i]["name"], "pass away")
+                del self.__room_object[i]
+            if "spawning" in self.__room_object[i] and self.__room_object[i]["spawning"] is True:
+                del self.__room_object[i]
         #     if self.__room_object[i]["room"] == self.__room_name and i not in data:
         #         del self.__room_object[i]
         self.__refresh_data()
@@ -807,7 +826,7 @@ class Render(object):
                 return
 
         # clear_output()
-        log(event.to_json())
+        # log(event.to_json())
 
         if event.name == "f1":
             self.__panel = "map"
@@ -1186,7 +1205,7 @@ def log(*args, **kwargs):
             elif type(v) in [list, dict, tuple, map]:
                 f.write("{}".format(json.dumps(v)))
             else:
-                f.write("{} {}".format(type(v), v))
+                f.write("!!!{}!!!".format(type(v)))
         f.write("\n")
 
 
@@ -1237,6 +1256,8 @@ def main():
         os.system("mode con: cols=120 lines=50")
 
     # pre start
+    if not os.path.isdir("log"):
+        os.mkdir("log")
     if not sign_in():
         if sys.version_info[0] > 2:
             input()
@@ -1245,8 +1266,6 @@ def main():
         exit()
     clear_output()
     # sys.excepthook = exception_hook
-    if not os.path.isdir("log"):
-        os.mkdir("log")
     if os.path.isfile(CLIENT_LOG_FILE):
         for i in range(8, 0, -1):
             if os.path.isfile("log/client-{}.log".format(i)):
