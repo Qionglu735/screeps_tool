@@ -48,7 +48,7 @@ _DB\_ setting is not used, just leave it blank._
 
 **F2**: Console
 
-**F3**: Memory(TODO)
+**F3**: Memory
 
 **ESC**: Exit
 
@@ -66,6 +66,8 @@ _DB\_ setting is not used, just leave it blank._
 
 **Enter**: open an operation menu, for creating construction site, etc(TODO)
 
+**Ctrl+R**: refresh
+
 Map character could be changed in config.py.
 
 ---
@@ -78,7 +80,19 @@ Map character could be changed in config.py.
 
 **Enter**: send command
 
-**Shift+Insert**: Paste
+**Shift+Insert**: paste
+
+**Ctrl+R**: refresh
+
+---
+
+#### 1.3.3 Memory
+
+**↑↓**: move cursor
+
+**Enter**: expend/collapse object
+
+**Ctrl+R**: refresh
 
 ---
 

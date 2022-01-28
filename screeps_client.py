@@ -544,6 +544,92 @@ class ConsoleView(object):
             self.__log_list = self.__log_list[len(self.__log_list) - 2000:]
 
 
+class MemoryView(object):
+
+    def __init__(self):
+        self.__api = screeps_api.Api(config.SERVER_HOST, config.SERVER_PORT, config.USERNAME, config.PASSWORD)
+
+        self.__memory_data = None
+        self.__expend_list = [0]
+
+    def __parse_memory_data(self):
+        line_list = json.dumps(self.__memory_data, indent=4).split("\n")
+        expend_status = [0] * len(line_list)
+        expend_status[0] = 1
+
+        stack = list()
+        path_list = list()
+        for _no, _l in enumerate(line_list):
+            if len(path_list) < 1:
+                if _no in self.__expend_list:
+                    expend_status[_no] = 2
+            else:
+                if _no in self.__expend_list:
+                    if expend_status[path_list[-1]] in [2]:
+                        expend_status[_no] = 2
+                else:
+                    if expend_status[path_list[-1]] in [2]:
+                        expend_status[_no] = 1
+
+            _l = _l.rstrip(" ").rstrip(",")
+            if _l[-1] in ["{", "[", "("]:
+                stack.append(_l[-1])
+                path_list.append(_no)
+            elif stack[-1] == "{" and _l[-1] == "}":
+                if len(_l) > 1 and _l[-2] == "{":
+                    pass
+                else:
+                    stack.pop()
+                    expend_status[_no] = expend_status[_no - 1]
+                    path_list.pop(-1)
+            elif stack[-1] == "[" and _l[-1] == "]":
+                if len(_l) > 1 and _l[-2] == "[":
+                    pass
+                else:
+                    stack.pop()
+                    expend_status[_no] = expend_status[_no - 1]
+                    path_list.pop(-1)
+            elif stack[-1] == "(" and _l[-1] == ")":
+                if len(_l) > 1 and _l[-2] == "(":
+                    pass
+                else:
+                    stack.pop()
+                    expend_status[_no] = expend_status[_no - 1]
+                    path_list.pop(-1)
+
+        _res = list()
+        i = 0
+        while i < len(line_list):
+            if expend_status[i] > 0:
+                _res.append({
+                    "no": i,
+                    "line": line_list[i]
+                })
+                if i + 1 < len(line_list) and expend_status[i + 1] == 0:
+                    _res[-1]["line"] += " ..."
+            i += 1
+
+        return _res
+
+    def get_memory(self):
+        if self.__memory_data is None:
+            self.__memory_data = self.__api.get_user_memory()["data"]
+        return self.__parse_memory_data()
+
+    def refresh_memory(self):
+        self.__memory_data = self.__api.get_user_memory()["data"]
+        return self.__parse_memory_data()
+
+    def set_expend_index(self, i):
+        if i not in self.__expend_list:
+            self.__expend_list.append(i)
+        else:
+            self.__expend_list.remove(i)
+        self.__expend_list.sort()
+        log(self.__expend_list)
+        return self.__parse_memory_data()
+
+
 class Render(object):
 
     def __init__(self):
@@ -587,7 +673,10 @@ class Render(object):
         self.__cmd_history_max = 20
         self.__cmd_index = 0
 
-        self.map_source = None
+        # Memory Panel
+        self.__memory_view = MemoryView()
+        self.__memory_index = 0
+        self.__memory_highlight_index = 0
 
     def start(self):
         self.__map_view.watch()
@@ -615,6 +704,7 @@ class Render(object):
         curses.init_pair(4, curses.COLOR_CYAN, curses.COLOR_BLACK)
         curses.init_pair(5, curses.COLOR_YELLOW, curses.COLOR_BLACK)
         curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_CYAN)
+        curses.init_pair(7, curses.COLOR_WHITE, curses.COLOR_CYAN)
 
         while not self.__quit:
 
@@ -808,6 +898,28 @@ class Render(object):
                         screen.insch(self.__screen_height - 1, i, " ", curses.color_pair(1))
 
                     screen.move(self.__screen_height - 1, 2 + self.__cursor_pos)
+
+                elif self.__panel == "memory":
+                    memory_list = self.__memory_view.get_memory()
+                    index_range = self.__screen_height - 1 \
+                        if len(memory_list) > self.__screen_height else len(memory_list)
+                    if len(memory_list) <= self.__screen_height - 1:
+                        index_start = 0
+                    elif self.__memory_index == -1:
+                        index_start = len(memory_list) - index_range
+                    else:
+                        index_start = self.__memory_index
+                    for i in range(index_start, index_start + index_range):
+                        if i >= len(memory_list):  # BUG: index_start + index_range > len(log_list)
+                            break
+                        if i == self.__memory_highlight_index:
+                            screen.addstr(1 + i - index_start, 0, memory_list[i]["line"], curses.color_pair(7))
+                            for j in range(len(memory_list[i]["line"]), self.__screen_width):
+                                screen.insch(1 + i - index_start, j, " ", curses.color_pair(7))
+                        else:
+                            screen.addstr(1 + i - index_start, 0, memory_list[i]["line"], curses.color_pair(0))
+
+                    screen.move(1 + self.__memory_highlight_index - index_start, self.__screen_width - 1)
             except curses.error:
                 log(traceback.format_exc())
                 time.sleep(1)
@@ -1149,6 +1261,23 @@ class Render(object):
                 else:
                     self.__cmd = ""
                 self.__cursor_pos = len(self.__cmd)
+        elif self.__panel == "memory":
+            memory_max_display_height = self.__screen_height - 1
+            memory_list = self.__memory_view.get_memory()
+            memory_len = len(memory_list)
+            if event.name == "up":
+                self.__memory_highlight_index = max(0, self.__memory_highlight_index - 1)
+                if self.__memory_highlight_index < self.__memory_index:
+                    self.__memory_index -= 1
+            if event.name == "down":
+                self.__memory_highlight_index = min(memory_len - 1,  self.__memory_highlight_index + 1)
+                if self.__memory_highlight_index == self.__memory_index + memory_max_display_height:
+                    self.__memory_index += 1
+            if event.name == "enter":
+                self.__memory_view.set_expend_index(memory_list[self.__memory_highlight_index]["no"])
+            if event.name == "r" and keyboard.is_pressed("ctrl"):
+                self.__memory_view.refresh_memory()
+            # log(event.name, self.__memory_highlight_index)
 
 
 class AutoPush(threading.Thread):
