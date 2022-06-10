@@ -1,3 +1,4 @@
+
 # —*- coding: utf-8 -*-
 
 import base64
@@ -8,19 +9,20 @@ import time
 import traceback
 import zlib
 
-from config import *
+from config import DB_HOST, DB_USERNAME, DB_PASSWORD, DB_PORT, DB_NAME
+from config import SERVER_HOST, SERVER_PORT, USERNAME, PASSWORD
 
 
 def main():
     db = MySQLdb.connect(DB_HOST, DB_USERNAME, DB_PASSWORD, port=DB_PORT, charset="utf8")
     cursor = db.cursor()
     try:
-        cursor.execute("USE screeps_stat")
+        cursor.execute("USE {}".format(DB_NAME))
     except MySQLdb.OperationalError:
         if "Unknown database" in traceback.format_exc():
-            print("database not exists: {}".format("screeps_stat"))
-            cursor.execute("CREATE DATABASE screeps_stat")
-            cursor.execute("USE screeps_stat")
+            print("database not exists: {}".format(DB_NAME))
+            cursor.execute("CREATE DATABASE {}".format(DB_NAME))
+            cursor.execute("USE {}".format(DB_NAME))
 
     if cursor.execute("SELECT table_name "
                       "FROM information_schema.TABLES "

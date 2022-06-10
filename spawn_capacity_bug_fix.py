@@ -16,9 +16,12 @@ def main():
                     if "energy" not in obj["storeCapacityResource"]:
                         print("{}: {}".format("spawn storeCapacityResource", obj["storeCapacityResource"]))
                         obj["storeCapacityResource"]["energy"] = 300
-                        print("fixed: {}".format(obj["storeCapacityResource"]))
+                        if "energy" not in obj["store"]:
+                            print("{}: {}".format("spawn store", obj["store"]))
+                            obj["store"]["energy"] = 300
                         # with open("db.json", "w") as f:
                         #     json.dump(db, f)
+                        #     print("fixed")
 
 # {'hits': 5000, '_id': 'da9712ec449ce79', 'off': False, 'room': u'W8N3', 'storeCapacityResource': {'energy': 300},
 # 'hitsMax': 5000, 'notifyWhenAttacked': True, u'$loki': 359, 'meta': {'updated': 1627544085213L,

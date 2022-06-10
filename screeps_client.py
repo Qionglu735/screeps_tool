@@ -575,6 +575,8 @@ class MemoryView(object):
             if _l[-1] in ["{", "[", "("]:
                 stack.append(_l[-1])
                 path_list.append(_no)
+            elif len(stack) == 0:
+                pass
             elif stack[-1] == "{" and _l[-1] == "}":
                 if len(_l) > 1 and _l[-2] == "{":
                     pass
@@ -626,7 +628,7 @@ class MemoryView(object):
         else:
             self.__expend_list.remove(i)
         self.__expend_list.sort()
-        log(self.__expend_list)
+        # log(self.__expend_list)
         return self.__parse_memory_data()
 
 
