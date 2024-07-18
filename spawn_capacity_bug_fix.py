@@ -12,7 +12,7 @@ def main():
         if col["name"] == "rooms.objects":
             for obj in col["data"]:
                 if obj["type"] == "spawn":
-                    print obj
+                    print(obj)
                     if "energy" not in obj["storeCapacityResource"]:
                         print("{}: {}".format("spawn storeCapacityResource", obj["storeCapacityResource"]))
                         obj["storeCapacityResource"]["energy"] = 300

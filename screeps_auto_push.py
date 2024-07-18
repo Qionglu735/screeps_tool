@@ -17,6 +17,9 @@ CONFIRM_BEFORE_PUSH = False
 DAEMON_MODE = False
 LOG_FILE = None
 
+if sys.version_info[0] > 2:
+    unicode = str
+
 
 class Color(object):
     def __init__(self):
@@ -105,7 +108,10 @@ def read_file(path):
         filename = _file.rstrip(".js")
         with open(os.path.join(root, _file)) as f:
             data = f.read()
-            modules[filename] = data.decode("utf-8")
+            if sys.version_info[0] > 2:
+                modules[filename] = data
+            else:
+                modules[filename] = data.decode("utf-8")
     for _dir in dirs:
         modules[_dir] = read_file(os.path.join(root, _dir))
     return modules
@@ -198,7 +204,7 @@ def main(log_file=None):
     while push_res and DAEMON_MODE:
         time.sleep(1)
         break_flag = False
-        for root, dirs, files in os.walk(os.path.join(config.SCRIPT_PATH, config.BRANCH_NAME)):
+        for root, dirs, files in os.walk(str(os.path.join(config.SCRIPT_PATH, config.BRANCH_NAME))):
             for f in files:
                 modify_time = datetime.datetime.fromtimestamp(os.stat(os.path.join(root, f)).st_mtime)
                 if modify_time > now:

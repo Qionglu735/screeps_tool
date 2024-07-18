@@ -1,6 +1,6 @@
 keyboard==0.13.5
-pyperclip==1.8.2
-pywin32==228
-requests==2.25.1
-websocket-client==0.58.0
-windows-curses==2.1.0
+pyperclip>=1.8.2
+pywin32>=228
+requests>=2.25.1
+websocket-client>=0.58.0
+windows-curses>=2.1.0

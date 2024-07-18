@@ -23,6 +23,9 @@ import screeps_auto_push
 CLIENT_LOG_FILE = "log/client.log"
 CONSOLE_LOG_FILE = "log/console.log"
 
+if sys.version_info[0] > 2:
+    unicode = str
+
 
 class MapView(object):
 
@@ -1312,9 +1315,10 @@ def sign_in():
                 print("Done.")
                 if "ok" not in api.get_me():
                     return False
-                # upload script and set active branch
+                # upload script
                 screeps_auto_push.main()
-                log(api.set_active_branch(config.BRANCH_NAME))
+    # set active branch
+    log("Set active branch:", api.set_active_branch(config.BRANCH_NAME))
     return True
 
 
@@ -1389,13 +1393,6 @@ def main():
     # pre start
     if not os.path.isdir("log"):
         os.mkdir("log")
-    if not sign_in():
-        if sys.version_info[0] > 2:
-            input()
-        else:
-            raw_input()
-        exit()
-    clear_output()
     # sys.excepthook = exception_hook
     if os.path.isfile(CLIENT_LOG_FILE):
         for i in range(8, 0, -1):
@@ -1408,6 +1405,14 @@ def main():
             if os.path.isfile("log/console-{}.log".format(i)):
                 shutil.move("log/console-{}.log".format(i), "log/console-{}.log".format(i + 1))
         shutil.move("log/console.log", "log/console-1.log")
+
+    if not sign_in():
+        if sys.version_info[0] > 2:
+            input()
+        else:
+            raw_input()
+        exit()
+    clear_output()
 
     # on start
     auto_push = AutoPush()

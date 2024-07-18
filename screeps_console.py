@@ -11,11 +11,11 @@ def console_callback(message):
     data = json.loads(message)[1]["messages"]
     log = data["log"]
     for i in log:
-        print i
+        print(i)
     result = data["results"]
     if len(result) > 0:
         for i in result:
-            print "> {}".format(i)
+            print("> {}".format(i))
 
 
 def main():
