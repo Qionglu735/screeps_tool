@@ -1,6 +1,7 @@
-*.lnk
-*.pyc
 .idea
-config.py
+__pycache__
 log
 venv
+*.lnk
+*.pyc
+config.py
