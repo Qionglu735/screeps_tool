@@ -1,24 +1,22 @@
 
 # —*- coding: utf-8 -*-
 
-import base64
-import json
-import MySQLdb
-import requests
+import pymysql
+import sys
 import time
 import traceback
-import zlib
 
 from config import DB_HOST, DB_USERNAME, DB_PASSWORD, DB_PORT, DB_NAME
 from config import SERVER_HOST, SERVER_PORT, USERNAME, PASSWORD
+from screeps_api import Api
 
 
 def main():
-    db = MySQLdb.connect(DB_HOST, DB_USERNAME, DB_PASSWORD, port=DB_PORT, charset="utf8")
+    db = pymysql.connect(host=DB_HOST, user=DB_USERNAME, password=DB_PASSWORD, port=DB_PORT, charset="utf8")
     cursor = db.cursor()
     try:
         cursor.execute("USE {}".format(DB_NAME))
-    except MySQLdb.OperationalError:
+    except pymysql.OperationalError:
         if "Unknown database" in traceback.format_exc():
             print("database not exists: {}".format(DB_NAME))
             cursor.execute("CREATE DATABASE {}".format(DB_NAME))
@@ -81,19 +79,8 @@ def main():
                        "info_value VARCHAR(256)"
                        ")")
 
-    token = requests.post("http://{}:{}/api/auth/signin".format(SERVER_HOST, SERVER_PORT),
-                          json={
-                              "email": USERNAME,
-                              "password": PASSWORD
-                          }).json()["token"]
-    raw_memory = requests.get("http://{}:{}/api/user/memory".format(SERVER_HOST, SERVER_PORT),
-                              headers={
-                                  "X-Token": token,
-                                  "X-Username": token
-                              }).json()
-    byte_string = base64.b64decode(raw_memory["data"][3:])
-    json_string = zlib.decompress(byte_string, 15 + 32)
-    memory = json.loads(json_string)
+    api = Api(SERVER_HOST, SERVER_PORT, USERNAME, PASSWORD)
+    memory = api.get_user_memory()["data"]
     print(memory["stat"])
     cpu = memory["stat"]["cpu"]
     cursor.execute("INSERT INTO `cpu` "
@@ -124,5 +111,5 @@ def main():
 
 if __name__ == "__main__":
     while True:
-        main()
         time.sleep(5)
+        main()

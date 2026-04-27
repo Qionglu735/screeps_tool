@@ -1,4 +1,6 @@
+cryptography==42.0.8
 keyboard==0.13.5
+PyMySQL>=1.1.1
 pyperclip>=1.8.2
 pywin32>=228
 requests>=2.25.1
