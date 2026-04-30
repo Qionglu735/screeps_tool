@@ -293,9 +293,9 @@ class MapView(object):
                                     if part in config.CHAR_BODY_PART else "?")
                     info["creepBody"] = "".join(body)
                 if "actionLog" in info:
-                    for key, item in info["actionLog"].items():
-                        if item is None:
-                            del info["actionLog"][key]
+                    info["actionLog"] = {
+                        key: item for key, item in info["actionLog"].items() if item is not None
+                    }
             except KeyError:
                 log("KeyError: 264")
                 log(json.dumps(info))
